@@ -1,18 +1,25 @@
 import {
-  mkdirSync, rmSync, existsSync, lstatSync, symlinkSync, cpSync, readlinkSync,
+  mkdirSync, rmSync, existsSync, lstatSync, symlinkSync, cpSync, readlinkSync, readFileSync,
 } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { saveConfig, loadConfig } from './config.js';
+import { agentHome, installableTargets } from './targets.js';
+import { atomicWrite } from './atomic.js';
+import { toPromptFile, isGenerated } from './promptfile.js';
 
 /**
- * Skill installation, in Node rather than in two shell scripts.
+ * Installation, in Node rather than in two shell scripts.
  *
  * This is the single implementation behind three entry points: `npm install` via
  * postinstall, `agent-memory setup`, and install.sh / install.ps1. Writing it once
  * matters because the machine that has to run it is a Windows desktop this was never
  * developed on, and a PowerShell copy of this logic would drift silently.
+ *
+ * Two formats are written, because the tools disagree about what a skill is. Agent
+ * skills are directories containing SKILL.md and get linked. VS Code prompt files are
+ * single `<name>.prompt.md` files and get written. Both are derived from the same
+ * skills/ directory, so there is still one source of truth.
  */
 
 export const SKILLS = ['handoff', 'recall', 'remember'];
@@ -22,15 +29,9 @@ export function packagedSkillsDir() {
   return resolve(dirname(fileURLToPath(import.meta.url)), '..', 'skills');
 }
 
-/**
- * The agent skill directories.
- *
- * Windows profiles are USERPROFILE, not HOME. AGENT_MEMORY_SKILLS_HOME exists so a
- * test can point this at something disposable instead of the real profile.
- */
+/** Skill directories only. Kept for the dangling-link check and for uninstall. */
 export function skillTargets() {
-  const home = process.env.AGENT_MEMORY_SKILLS_HOME || process.env.USERPROFILE || homedir();
-  return [join(home, '.agents', 'skills'), join(home, '.claude', 'skills')];
+  return installableTargets().filter((t) => t.kind === 'skill-dir').map((t) => t.dir);
 }
 
 function isLink(path) {
@@ -71,6 +72,21 @@ export function linkSkill(name, targetDir) {
 }
 
 /**
+ * Write one skill as a VS Code prompt file.
+ *
+ * Written rather than linked: prompt files are single files, and a symlinked one is
+ * not reliably picked up across VS Code's file watching. The cost is that an upgrade
+ * needs `agent-memory setup` re-run, which the installer says out loud.
+ */
+export function writePromptFile(name, targetDir) {
+  const source = join(packagedSkillsDir(), name, 'SKILL.md');
+  const dest = join(targetDir, `${name}.prompt.md`);
+  mkdirSync(targetDir, { recursive: true });
+  atomicWrite(dest, toPromptFile(readFileSync(source, 'utf8'), { name }));
+  return { name, path: dest, mode: 'prompt' };
+}
+
+/**
  * Skill links whose target no longer exists.
  *
  * npm 7 dropped support for uninstall lifecycle hooks, so `npm uninstall -g` deletes
@@ -92,15 +108,12 @@ export function danglingSkillLinks() {
 }
 
 /**
- * Remove the skill links this package created.
+ * Remove everything this package installed, in both formats.
  *
- * Without this, `npm uninstall -g` deletes the package and leaves six symlinks
- * pointing into a directory that no longer exists, which both agents would still try
- * to load. A dangling skill is worse than a missing one.
- *
- * Only entries that resolve back to this package are removed. Someone may have put
- * their own `handoff` skill there by hand, and deleting it because the name matched
- * would be destroying data we were never asked to manage.
+ * Only entries that are ours are removed: a skill directory is ours if it resolves
+ * back to this package, and a prompt file is ours if it carries the generated marker.
+ * Someone may have written their own `recall.prompt.md`, and deleting it because the
+ * name matched would be destroying work we were never asked to manage.
  *
  * The store is never touched. Notes are the user's own writing and outlive the tool
  * that indexed them; removing them is a separate, deliberate act.
@@ -109,24 +122,36 @@ export function unlinkSkills() {
   const packaged = packagedSkillsDir();
   const removed = [];
   const kept = [];
-  for (const name of SKILLS) {
-    for (const dir of skillTargets()) {
-      const link = join(dir, name);
-      if (!existsSync(link) && !isLink(link)) continue;
-      let owned = false;
-      try {
-        owned = isLink(link)
-          ? resolve(readlinkSync(link)) === join(packaged, name)
-          : existsSync(join(link, 'SKILL.md'));
-      } catch {
-        // A link we cannot read is a link we cannot claim. Leave it.
-        owned = false;
-      }
-      if (owned) {
-        clear(link);
-        removed.push(link);
+
+  for (const target of installableTargets()) {
+    for (const name of SKILLS) {
+      if (target.kind === 'skill-dir') {
+        const link = join(target.dir, name);
+        if (!existsSync(link) && !isLink(link)) continue;
+        let owned = false;
+        try {
+          owned = isLink(link)
+            ? resolve(readlinkSync(link)) === join(packaged, name)
+            : existsSync(join(link, 'SKILL.md'));
+        } catch {
+          // A link we cannot read is a link we cannot claim. Leave it.
+          owned = false;
+        }
+        if (owned) {
+          clear(link);
+          removed.push(link);
+        } else {
+          kept.push(link);
+        }
       } else {
-        kept.push(link);
+        const file = join(target.dir, `${name}.prompt.md`);
+        if (!existsSync(file)) continue;
+        if (isGenerated(readFileSync(file, 'utf8'))) {
+          rmSync(file, { force: true });
+          removed.push(file);
+        } else {
+          kept.push(file);
+        }
       }
     }
   }
@@ -134,22 +159,26 @@ export function unlinkSkills() {
 }
 
 /**
- * Link every skill, register the one whose description is generated, build the store.
+ * Install into every agent present on this machine, then build the store.
  *
- * Only `recall` is registered. `compact` overwrites the description of every path it
- * is given, and handoff and remember describe themselves; registering all three would
- * replace two good descriptions with a third.
- *
- * A copied skill registers its copy too, because rewriting the packaged original
- * would never reach it.
+ * Only `recall` is registered for description regeneration. `compact` overwrites the
+ * description of every path it is given, and handoff and remember describe
+ * themselves; registering all three would replace two good descriptions with a third.
+ * Copies and prompt files register their own path, because rewriting the packaged
+ * original would never reach them.
  */
 export function setup({ compactFn } = {}) {
+  const targets = installableTargets();
   const installed = [];
   const copies = [];
-  for (const name of SKILLS) {
-    for (const dir of skillTargets()) {
-      const r = linkSkill(name, dir);
-      installed.push(r);
+
+  for (const target of targets) {
+    for (const name of SKILLS) {
+      const r =
+        target.kind === 'skill-dir'
+          ? linkSkill(name, target.dir)
+          : writePromptFile(name, target.dir);
+      installed.push({ ...r, target: target.id, label: target.label });
       if (r.mode === 'copy') copies.push(r);
     }
   }
@@ -157,6 +186,7 @@ export function setup({ compactFn } = {}) {
   const skillPaths = [
     join(packagedSkillsDir(), 'recall', 'SKILL.md'),
     ...copies.filter((c) => c.name === 'recall').map((c) => join(c.path, 'SKILL.md')),
+    ...installed.filter((i) => i.mode === 'prompt' && i.name === 'recall').map((i) => i.path),
   ];
   // Drop registrations whose file is gone before adding the current ones. Renaming
   // the checkout, moving it, or reinstalling under a different prefix each leave a
@@ -170,9 +200,11 @@ export function setup({ compactFn } = {}) {
   // npm postinstall path with it, into memory just to make some symlinks.
   const result = compactFn ? compactFn() : null;
   return {
+    targets,
     installed,
     copies,
     skillPaths,
+    home: agentHome(),
     digest: result?.digest ?? null,
     notes: result?.indexed ?? 0,
   };

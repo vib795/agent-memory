@@ -11,6 +11,7 @@ import { buildTree, renderTree, buildDigest } from './digest.js';
 import { compact, maybeCompact } from './compact.js';
 import { staleness, currentRepo, reviewCandidates } from './staleness.js';
 import { setup as runSetup, unlinkSkills, danglingSkillLinks } from './setup.js';
+import { detectTargets } from './targets.js';
 
 /**
  * One process, one answer.
@@ -127,18 +128,40 @@ function cmdInit(opts) {
 function cmdSetup() {
   ensureStore();
   const r = runSetup({ compactFn: () => compact() });
-  const lines = r.installed.map((s) => `  [${s.mode === 'link' ? 'link' : 'copy'}] ${s.path}`);
+
+  const lines = [];
+  for (const t of r.targets) {
+    lines.push(`  ${t.label}`);
+    for (const s of r.installed.filter((i) => i.target === t.id)) {
+      lines.push(`    [${s.mode}] ${s.path}`);
+    }
+  }
+
+  // Detected but not written to. Saying so is the point: silence would read as
+  // "supported" for a tool we deliberately skipped.
+  const skipped = detectTargets().filter((t) => t.kind === 'unsupported');
+  if (skipped.length) {
+    lines.push('', '  Detected but not installable:');
+    for (const t of skipped) lines.push(`    ${t.label} — ${t.note}`);
+  }
   if (r.copies.length) {
     lines.push(
       '',
-      'Some skills were copied rather than linked, which happens on a network-backed',
-      'profile. Re-run `agent-memory setup` after upgrading the package to refresh them.',
+      '  Some skills were copied rather than linked, which happens on a network-backed',
+      '  profile. Re-run `agent-memory setup` after upgrading to refresh them.',
     );
   }
+
   return {
     ok: true,
     ...r,
-    text: ['Installed skills:', ...lines, '', `Store ready at ${paths.root} (${r.notes} notes).`].join('\n'),
+    text: [
+      `Installed for ${r.targets.length} agent${r.targets.length === 1 ? '' : 's'}:`,
+      ...lines,
+      '',
+      `Store ready at ${paths.root} (${r.notes} notes).`,
+      'Restart your editor, then try /recall, /remember or /handoff.',
+    ].join('\n'),
   };
 }
 
@@ -439,6 +462,15 @@ function cmdDoctor() {
       : missing.length
         ? `${missing.join(', ')} no longer exists — run \`agent-memory setup\``
         : registered.join(', '),
+  );
+
+  // Which agents are actually on this machine, so a user who installed and saw
+  // nothing can tell "we did not find your editor" from "your editor ignored us".
+  const agents = detectTargets();
+  add(
+    'agents detected',
+    agents.some((t) => t.kind !== 'unsupported'),
+    agents.map((t) => `${t.label}${t.kind === 'unsupported' ? ' (skipped)' : ''}`).join('; '),
   );
 
   const dangling = danglingSkillLinks();

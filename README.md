@@ -111,9 +111,24 @@ npm install -g https://github.com/vib795/agent-memory.git
 agent-memory setup
 ```
 
-`setup` links `handoff`, `recall` and `remember` into both agent directories
-(`~/.agents/skills` and `~/.claude/skills`, or `%USERPROFILE%\...` on Windows),
-creates the store, and generates the routing digest.
+`setup` probes for every agent on the machine and installs into each one it finds,
+in whatever format that tool reads. It then creates the store and generates the
+routing digest.
+
+| Detected | Installed as | Where |
+|---|---|---|
+| Agent skills (shared convention) | linked skill directory | `~/.agents/skills/<name>/` |
+| Claude Code, CLI and VS Code extension | linked skill directory | `~/.claude/skills/<name>/` |
+| VS Code, Insiders, VSCodium, Cursor, Windsurf | prompt file | `<user data>/prompts/<name>.prompt.md` |
+| Copilot CLI | *detected, skipped* | it documents no user-global prompt directory; use `.github/copilot-instructions.md` per repo |
+
+Prompt files are what GitHub Copilot chat reads, and they appear as `/recall`,
+`/remember` and `/handoff` in the chat box. They are **generated from the same
+`SKILL.md` files** rather than maintained separately, so the two formats cannot
+drift, and `compact` regenerates the routing digest into both.
+
+`agent-memory doctor` lists what it detected, so an install that appears to do
+nothing tells you whether your editor was missed or simply ignored the files.
 
 **Why it is not automatic.** There is a `postinstall` hook that does exactly this,
 but current npm refuses to run package install scripts unless you opt in per

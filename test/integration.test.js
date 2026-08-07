@@ -22,6 +22,8 @@ const { compact, writeSkillDescription } = await import('../src/compact.js');
 const stale = await import('../src/staleness.js');
 const { setup, unlinkSkills, danglingSkillLinks, skillTargets, packagedSkillsDir, SKILLS } =
   await import('../src/setup.js');
+const { vscodeUserDir } = await import('../src/targets.js');
+const { isGenerated } = await import('../src/promptfile.js');
 const { atomicWrite, tempName } = await import('../src/atomic.js');
 const { paths, DEFAULTS, loadConfig, saveConfig } = await import('../src/config.js');
 
@@ -454,18 +456,72 @@ test('two ids describing the same thing warn, and the write still lands', async 
 
 // --- skill installation ---------------------------------------------------------
 
-test('setup links all three skills into both agent directories', () => {
-  seed().close();
+/** A home with the given agents "installed", so detection has something to find. */
+function fakeHome({ claude = false, vscode = false } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
+  if (claude) mkdirSync(join(home, '.claude'), { recursive: true });
+  // Set the override before deriving the path: on Windows that is what stops the
+  // VS Code location resolving to the real %APPDATA%.
+  if (vscode) {
+    process.env.AGENT_MEMORY_SKILLS_HOME = home;
+    mkdirSync(vscodeUserDir('Code', home), { recursive: true });
+  }
   process.env.AGENT_MEMORY_SKILLS_HOME = home;
+  return home;
+}
+
+test('setup installs only where a tool is actually present', () => {
+  seed().close();
+  // A bare home has no agents but ours. Writing into ~/.claude here would be
+  // inventing an install for a tool that is not on the machine.
+  const bare = fakeHome();
   try {
     const r = setup({});
-    assert.equal(r.installed.length, 6, 'three skills across two agent directories');
+    assert.deepEqual(r.targets.map((t) => t.id), ['agents']);
+    assert.equal(r.installed.length, SKILLS.length);
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(bare, { recursive: true, force: true });
+  }
+
+  const both = fakeHome({ claude: true });
+  try {
+    const r = setup({});
+    assert.deepEqual(r.targets.map((t) => t.id).sort(), ['agents', 'claude-code']);
     for (const dir of skillTargets()) {
       for (const name of SKILLS) {
         assert.ok(existsSync(join(dir, name, 'SKILL.md')), `${name} missing from ${dir}`);
       }
     }
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(both, { recursive: true, force: true });
+  }
+});
+
+test('a VS Code install gets prompt files, generated from the skills', () => {
+  seed().close();
+  const home = fakeHome({ vscode: true });
+  try {
+    const r = setup({});
+    assert.ok(r.targets.some((t) => t.kind === 'prompt-dir'), 'VS Code was detected');
+
+    const dir = r.targets.find((t) => t.kind === 'prompt-dir').dir;
+    for (const name of SKILLS) {
+      const file = join(dir, `${name}.prompt.md`);
+      assert.ok(existsSync(file), `${name}.prompt.md missing`);
+      const text = readFileSync(file, 'utf8');
+      assert.match(text, /^---\nmode: agent\ndescription: "/, 'needs prompt-file frontmatter');
+      assert.ok(isGenerated(text), 'must carry the marker uninstall looks for');
+    }
+
+    // The body is derived from SKILL.md rather than written twice.
+    const recall = readFileSync(join(dir, 'recall.prompt.md'), 'utf8');
+    assert.match(recall, /agent-memory tree/, 'the skill body came across');
+
+    // compact must regenerate the prompt file description too, or Copilot keeps
+    // routing on a placeholder while Claude Code sees the real digest.
+    assert.ok(r.skillPaths.includes(join(dir, 'recall.prompt.md')));
   } finally {
     delete process.env.AGENT_MEMORY_SKILLS_HOME;
     rmSync(home, { recursive: true, force: true });
@@ -639,22 +695,32 @@ test('get on an archived node says so rather than returning nothing', () => {
 
 // --- uninstall ---------------------------------------------------------------------
 
-test('uninstall removes our links, spares a foreign one, and keeps every note', () => {
+test('uninstall removes our links and prompt files, spares foreign ones, keeps notes', () => {
   seed().close();
-  const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
-  process.env.AGENT_MEMORY_SKILLS_HOME = home;
+  const home = fakeHome({ claude: true, vscode: true });
   try {
-    setup({});
-    // Someone else's skill that happens to share a name must survive.
+    const installed = setup({});
+    const promptDir = installed.targets.find((t) => t.kind === 'prompt-dir').dir;
+
+    // Someone else's skill directory that happens to share a name must survive.
     const foreign = join(skillTargets()[1], 'handoff');
     rmSync(foreign, { recursive: true, force: true });
     mkdirSync(foreign, { recursive: true });
     writeFileSync(join(foreign, 'NOTES.txt'), 'hand-rolled, not ours', 'utf8');
+    // And so must a hand-written prompt file, which is why ownership is decided by
+    // the generated marker rather than by the filename.
+    const foreignPrompt = join(promptDir, 'remember.prompt.md');
+    writeFileSync(foreignPrompt, '---\nmode: agent\n---\nmine, not yours\n', 'utf8');
 
     const r = unlinkSkills();
-    assert.equal(r.removed.length, 5, 'five of ours removed');
-    assert.deepEqual(r.kept, [foreign], 'the foreign directory is left alone');
+    assert.deepEqual(r.kept.sort(), [foreign, foreignPrompt].sort(), 'foreign files left alone');
     assert.ok(existsSync(join(foreign, 'NOTES.txt')));
+    assert.equal(readFileSync(foreignPrompt, 'utf8').trim().endsWith('mine, not yours'), true);
+    assert.ok(
+      r.removed.some((p) => p.endsWith('recall.prompt.md')),
+      'generated prompt files are removed',
+    );
+    assert.ok(r.removed.some((p) => p.endsWith(join('skills', 'recall'))), 'skill links removed');
 
     for (const name of SKILLS) {
       assert.ok(existsSync(join(packagedSkillsDir(), name, 'SKILL.md')), `packaged ${name} destroyed`);
