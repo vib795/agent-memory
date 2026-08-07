@@ -33,17 +33,25 @@ export const DEFAULTS = {
   compactThreshold: 10, // node-count delta that triggers an automatic compact
 };
 
+// Written by the installer: every SKILL.md whose description compact regenerates.
+// The store cannot discover these on its own, because a skill may be symlinked
+// from a checkout or copied into place, and both are legitimate installs.
+export const LIST_KEYS = ['skillPaths'];
+
 export function loadConfig() {
-  if (!existsSync(paths.config)) return { ...DEFAULTS };
+  if (!existsSync(paths.config)) return { ...DEFAULTS, skillPaths: [] };
   try {
     const raw = JSON.parse(readFileSync(paths.config, 'utf8'));
-    const merged = { ...DEFAULTS };
+    const merged = { ...DEFAULTS, skillPaths: [] };
     for (const [k, v] of Object.entries(raw)) {
       if (k in DEFAULTS && typeof v === 'number' && Number.isFinite(v) && v > 0) merged[k] = v;
+      if (LIST_KEYS.includes(k) && Array.isArray(v)) {
+        merged[k] = v.filter((s) => typeof s === 'string' && s.trim());
+      }
     }
     return merged;
   } catch {
     // A malformed config must not take the store down. Defaults are always valid.
-    return { ...DEFAULTS };
+    return { ...DEFAULTS, skillPaths: [] };
   }
 }
