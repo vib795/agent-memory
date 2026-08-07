@@ -490,6 +490,27 @@ test('setup registers recall and nothing else', () => {
   }
 });
 
+test('setup forgets a registered skill whose file is gone', () => {
+  seed().close();
+  const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
+  process.env.AGENT_MEMORY_SKILLS_HOME = home;
+  try {
+    // Exactly what renaming or moving the checkout leaves behind. A union that never
+    // prunes keeps it forever, and compact then writes to a path that is not there
+    // while doctor reports a failure naming the path that is fine.
+    const dead = join(home, 'moved-away', 'skills', 'recall', 'SKILL.md');
+    saveConfig({ skillPaths: [dead] });
+
+    setup({});
+    const after = loadConfig().skillPaths;
+    assert.ok(!after.includes(dead), `stale path survived: ${JSON.stringify(after)}`);
+    assert.deepEqual(after, [join(packagedSkillsDir(), 'recall', 'SKILL.md')]);
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('setup is idempotent, and replacing a link never deletes the source', () => {
   seed().close();
   const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));

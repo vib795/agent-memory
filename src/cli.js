@@ -428,11 +428,17 @@ function cmdDoctor() {
   add('digest within cap', digest.length <= cfg.digestChars, `${digest.length}/${cfg.digestChars} chars`);
 
   const registered = cfg.skillPaths || [];
-  const skillsFound = registered.filter((p) => existsSync(p));
+  const missing = registered.filter((p) => !existsSync(p));
   add(
     'skills linked',
-    registered.length > 0 && skillsFound.length === registered.length,
-    registered.length ? skillsFound.join(', ') : 'none registered; run `agent-memory setup`',
+    registered.length > 0 && missing.length === 0,
+    // Name what is broken. Listing the paths that resolve while reporting a failure
+    // sends the reader to look at the one file that is fine.
+    registered.length === 0
+      ? 'none registered; run `agent-memory setup`'
+      : missing.length
+        ? `${missing.join(', ')} no longer exists — run \`agent-memory setup\``
+        : registered.join(', '),
   );
 
   const dangling = danglingSkillLinks();

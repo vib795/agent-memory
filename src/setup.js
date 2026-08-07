@@ -158,7 +158,12 @@ export function setup({ compactFn } = {}) {
     join(packagedSkillsDir(), 'recall', 'SKILL.md'),
     ...copies.filter((c) => c.name === 'recall').map((c) => join(c.path, 'SKILL.md')),
   ];
-  const existing = loadConfig().skillPaths || [];
+  // Drop registrations whose file is gone before adding the current ones. Renaming
+  // the checkout, moving it, or reinstalling under a different prefix each leave a
+  // path that no longer resolves, and a union that never prunes keeps it forever --
+  // after which compact writes to a file that is not there and doctor reports a
+  // failure while naming the path that is fine.
+  const existing = (loadConfig().skillPaths || []).filter((p) => existsSync(p));
   saveConfig({ skillPaths: [...new Set([...existing, ...skillPaths])] });
 
   // compact is passed in so this module does not pull the database, and the whole
