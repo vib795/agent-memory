@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { loadConfig, paths } from './config.js';
 import { listNotes, archiveNote, contentHash, nowIso, serializeNote } from './store.js';
+import { atomicWrite } from './atomic.js';
 import { openDb, reindex } from './index-db.js';
 import { buildDigest, buildTree, renderTree } from './digest.js';
 
@@ -33,9 +34,7 @@ function unionEdges(...lists) {
 
 /** Rewrite a note in place, preserving `updated`. Graph repair, not an edit. */
 function rewrite(node) {
-  const tmp = `${node.path}.tmp`;
-  writeFileSync(tmp, serializeNote(node), 'utf8');
-  renameSync(tmp, node.path);
+  atomicWrite(node.path, serializeNote(node));
 }
 
 /**
@@ -166,9 +165,7 @@ export function writeSkillDescription(skillPath, description) {
     ? head.replace(/^description:.*$/m, line)
     : `${head}\n${line}`;
 
-  const tmp = `${skillPath}.tmp`;
-  writeFileSync(tmp, updated + rest, 'utf8');
-  renameSync(tmp, skillPath);
+  atomicWrite(skillPath, updated + rest);
   return true;
 }
 
@@ -185,9 +182,7 @@ function regenerate(db, cfg) {
     renderTree(tree),
     '',
   ].join('\n');
-  const tmp = `${paths.routing}.tmp`;
-  writeFileSync(tmp, routing, 'utf8');
-  renameSync(tmp, paths.routing);
+  atomicWrite(paths.routing, routing);
 
   const skills = [];
   for (const p of cfg.skillPaths || []) {

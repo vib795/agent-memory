@@ -10,7 +10,7 @@ import { neighborhood, applyBudget } from './graph.js';
 import { buildTree, renderTree, buildDigest } from './digest.js';
 import { compact, maybeCompact } from './compact.js';
 import { staleness, currentRepo, reviewCandidates } from './staleness.js';
-import { setup as runSetup } from './setup.js';
+import { setup as runSetup, unlinkSkills, danglingSkillLinks } from './setup.js';
 
 /**
  * One process, one answer.
@@ -69,6 +69,7 @@ const USAGE = `agent-memory — durable cross-repo knowledge for coding agents
 
   setup                                  link all three skills, build the store
                                          (runs automatically on npm install)
+  uninstall                              remove the skill links; keeps every note
   init [--skills "<p1>,<p2>"]            create the store; register skill files
   index                                  rebuild index.db from notes/
   tree [--repo <name>] [--all]           routing map, scoped to a repo
@@ -141,6 +142,29 @@ function cmdSetup() {
   };
 }
 
+/**
+ * Remove the skill links, leaving every note in place.
+ *
+ * Runs from npm's preuninstall hook so that `npm uninstall -g` does not leave links
+ * pointing into a deleted package. The store is deliberately untouched: it is plain
+ * markdown, it is the user's own writing, and it stays readable with no tooling.
+ */
+function cmdUninstall() {
+  const r = unlinkSkills();
+  return {
+    ok: true,
+    ...r,
+    store: paths.root,
+    text: [
+      ...r.removed.map((p) => `  [removed] ${p}`),
+      ...r.kept.map((p) => `  [kept]    ${p} (not ours)`),
+      r.removed.length ? '' : 'No skill links found.',
+      `Your notes are untouched at ${paths.root}.`,
+      'They are plain markdown and stay readable with nothing installed.',
+    ].filter(Boolean).join('\n'),
+  };
+}
+
 function cmdIndex() {
   const db = openDb({ reindexOnCreate: false });
   const r = reindex(db);
@@ -173,7 +197,19 @@ function cmdGet(opts) {
 
   const db = openDb();
   const includeArchived = !!opts['include-archived'];
+  // Looked up permissively so that an archived node can be reported as archived.
+  // Without this the traversal below would silently prune the root and return an
+  // empty result that reads exactly like "this note does not exist".
   const root = getNodeRow(db, id, { includeArchived: true });
+  if (root?.archived && !includeArchived) {
+    db.close();
+    return {
+      ok: false,
+      error: `${id} is archived`,
+      archived: true,
+      text: `${id} is archived (superseded, merged, or decayed).\nRetrieve it with: agent-memory get ${id} --include-archived`,
+    };
+  }
   if (!root) {
     // A miss is a routing failure, not a dead end. Offer what search would find.
     const near = searchNodes(db, id, { limit: 5 }).map((n) => ({ id: n.id, title: n.title }));
@@ -399,6 +435,15 @@ function cmdDoctor() {
     registered.length ? skillsFound.join(', ') : 'none registered; run `agent-memory setup`',
   );
 
+  const dangling = danglingSkillLinks();
+  add(
+    'no broken skill links',
+    dangling.length === 0,
+    dangling.length
+      ? `${dangling.join(', ')} — leftovers from an uninstall; remove them or run \`agent-memory setup\``
+      : 'none',
+  );
+
   const stale = reviewCandidates(db, { cfg });
   add(
     'staleness',
@@ -424,6 +469,7 @@ function cmdDoctor() {
 
 const COMMANDS = {
   setup: cmdSetup,
+  uninstall: cmdUninstall,
   init: cmdInit,
   index: cmdIndex,
   tree: cmdTree,

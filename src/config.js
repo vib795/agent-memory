@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { atomicWrite } from './atomic.js';
 
 // The store lives outside every repository on purpose. That is what makes a note
 // written in one window readable from a window opened on a different project.
@@ -85,8 +86,6 @@ export function saveConfig(patch) {
     }
   }
 
-  const tmp = `${paths.config}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  renameSync(tmp, paths.config);
+  atomicWrite(paths.config, `${JSON.stringify(next, null, 2)}\n`);
   return next;
 }

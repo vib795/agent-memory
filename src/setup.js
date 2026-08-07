@@ -1,4 +1,6 @@
-import { mkdirSync, rmSync, existsSync, lstatSync, symlinkSync, cpSync } from 'node:fs';
+import {
+  mkdirSync, rmSync, existsSync, lstatSync, symlinkSync, cpSync, readlinkSync,
+} from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -66,6 +68,69 @@ export function linkSkill(name, targetDir) {
     cpSync(source, link, { recursive: true });
     return { name, path: link, mode: 'copy', reason: err.message };
   }
+}
+
+/**
+ * Skill links whose target no longer exists.
+ *
+ * npm 7 dropped support for uninstall lifecycle hooks, so `npm uninstall -g` deletes
+ * the package and leaves these behind with nothing to clean them up — and by then the
+ * binary that would have done it is gone too. Detecting them is the only remedy left,
+ * and a broken skill an agent keeps trying to load is worth naming out loud.
+ */
+export function danglingSkillLinks() {
+  const out = [];
+  for (const name of SKILLS) {
+    for (const dir of skillTargets()) {
+      const link = join(dir, name);
+      // existsSync follows the link, so a true isLink with a false existsSync is
+      // exactly the broken case and nothing else.
+      if (isLink(link) && !existsSync(link)) out.push(link);
+    }
+  }
+  return out;
+}
+
+/**
+ * Remove the skill links this package created.
+ *
+ * Without this, `npm uninstall -g` deletes the package and leaves six symlinks
+ * pointing into a directory that no longer exists, which both agents would still try
+ * to load. A dangling skill is worse than a missing one.
+ *
+ * Only entries that resolve back to this package are removed. Someone may have put
+ * their own `handoff` skill there by hand, and deleting it because the name matched
+ * would be destroying data we were never asked to manage.
+ *
+ * The store is never touched. Notes are the user's own writing and outlive the tool
+ * that indexed them; removing them is a separate, deliberate act.
+ */
+export function unlinkSkills() {
+  const packaged = packagedSkillsDir();
+  const removed = [];
+  const kept = [];
+  for (const name of SKILLS) {
+    for (const dir of skillTargets()) {
+      const link = join(dir, name);
+      if (!existsSync(link) && !isLink(link)) continue;
+      let owned = false;
+      try {
+        owned = isLink(link)
+          ? resolve(readlinkSync(link)) === join(packaged, name)
+          : existsSync(join(link, 'SKILL.md'));
+      } catch {
+        // A link we cannot read is a link we cannot claim. Leave it.
+        owned = false;
+      }
+      if (owned) {
+        clear(link);
+        removed.push(link);
+      } else {
+        kept.push(link);
+      }
+    }
+  }
+  return { removed, kept };
 }
 
 /**

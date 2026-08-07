@@ -154,64 +154,49 @@ A transcript summary reads fine and still leaves the next agent asking questions
 - **Anchors** — the `file:line` references that matter
 - **Open questions** only you can answer
 
-## Install
-
-### Windows (Azure Virtual Desktop)
-
-```powershell
-git clone https://github.com/vib795/copilot-memory-everywhere.git
-cd copilot-memory-everywhere
-powershell -ExecutionPolicy Bypass -File .\skills\handoff\install.ps1
-```
-
-### macOS / Linux
-
-```bash
-git clone https://github.com/vib795/copilot-memory-everywhere.git
-cd copilot-memory-everywhere
-./skills/handoff/install.sh
-```
-
-Both installers link the skill into the two paths the agents actually read:
-
-| Path | Read by |
-|---|---|
-| `~/.agents/skills/handoff` | GitHub Copilot, in every VS Code window and every repo |
-| `~/.claude/skills/handoff` | Claude Code |
-
-Junctions (Windows) and symlinks (POSIX) are preferred, so `git pull` updates both
-agents at once. Junctions need no admin rights and no Developer Mode, but they can
-fail when the user profile lives on a network share (FSLogix, roaming profiles).
-The installer falls back to a copy and tells you which one you got. If you were
-copied, re-run the installer after each `git pull`.
-
-Restart VS Code after installing.
-
 ## Use
 
-**Window A**, when you're wrapping up or switching:
+Two different jobs, and it is worth being clear about which is which.
+
+**Moving a thread between windows.** In window A:
 
 ```
 /handoff
 ```
 
-It prints a pickup line. **Window B**, any repo, paste it:
+It prints a pickup line. In window B, any repo, paste it:
 
 ```
 Read C:\Users\you\.agents\handoffs\migrate-orders-to-result-type.md and continue this work. Follow the Next action.
 ```
 
-That's the whole loop. One command, one paste.
+**Keeping what stays true.** `/handoff` also writes durable knowledge into the graph
+in the same request — same turn, no extra credit. Mid-session, when something worth
+keeping is established and you are not switching windows:
+
+```
+/remember
+/remember the retry policy on the orders webhook
+```
+
+And in any repo, later, ask a question that memory should already answer. The agent
+invokes `/recall` on its own, because the skill description tells it what is in
+there.
 
 ## Where things live
 
 ```
-%USERPROFILE%\.agents\handoffs\      (Windows)
-~/.agents/handoffs/                  (macOS / Linux)
-  index.md              one row per thread, kept small so lookup stays cheap
-  <thread-id>.md        current handoff
-  <thread-id>.detail.md overflow, only when a thread outgrows the soft target
-  <thread-id>.prev.md   exactly one prior version
+%USERPROFILE%\.agents\        (Windows; ~/.agents/ on macOS and Linux)
+  handoffs/
+    index.md            one row per thread, kept small so lookup stays cheap
+    <thread-id>.md      current handoff
+    <thread-id>.prev.md exactly one prior version
+  memory/
+    notes/<type>/<id>.md  the source of truth, plain markdown
+    notes/archive/        superseded, merged and decayed notes; never deleted
+    index.db              disposable SQLite cache, rebuildable at any time
+    ROUTING.md            generated map of everything known
+    config.json           every cap in the design, tunable
 ```
 
 Re-running `/handoff` on the same thread updates it in place and keeps one `.prev`
@@ -220,34 +205,61 @@ that drifts as the work progresses does not create a duplicate.
 
 ## Design constraints it holds to
 
-- **One model request per handoff.** No tool loops, no re-reading source, no
-  interrogating you. Credits are the reason this exists.
-- **Zero infrastructure.** Files only. No daemon, no server, no network call,
-  nothing for an IT policy to approve.
-- **Secrets never hit disk.** Tokens, keys, and connection strings are replaced
-  with `<redacted:kind>` before the file is written.
-- **Reversible.** `uninstall.ps1` removes the skill; your handoffs are inert
-  markdown you can keep or delete.
+- **Memory work costs no extra requests.** A premium request is charged per prompt,
+  not per tool call, so capture rides inside a turn you already paid for. Only
+  `/remember` costs a request, and only because you chose to spend it.
+- **Zero infrastructure.** Files and Node core. No daemon, no server, no scheduled
+  task, no network call, nothing for an IT policy to approve.
+- **Secrets never hit disk.** Tokens, keys, and connection strings become
+  `<redacted:kind>` before any byte is written — not to a note, not to a temp file,
+  not to the index. There is no bypass flag.
+- **Nothing is deleted.** Superseded, merged and decayed notes move to `archive/`
+  and stay reachable with `--include-archived`.
+- **Reversible.** `npm uninstall -g agent-memory` removes the links and leaves every
+  note in place, readable with nothing installed.
 
 ## Status
 
-v1 is **write-only** and deliberate. You invoke it; it never fires on its own.
+Capture is **explicit**. You invoke it, or `/handoff` does; nothing fires on its own.
 
 Not built yet, by choice:
 
-- `/resume` reader skill (v1 uses a file reference, which both agents support natively)
 - Automatic or ambient capture
 - Team sharing, multi-machine sync
-- An MCP server (it would read this same directory, so it's an addition, not a rewrite)
+- An MCP server. It would read this same store, so it is an addition, not a rewrite.
+
+What is deliberately unproven, and where you will find out: the cold-read test — a
+fresh chat in a repo untouched for a month, answering correctly from the digest
+alone. That needs real elapsed time and cannot be faked in a test suite.
 
 ## Uninstall
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\skills\handoff\uninstall.ps1
+Order matters, and npm will not do it for you:
+
+```bash
+agent-memory uninstall      # first — removes the six skill links
+npm uninstall -g agent-memory
 ```
 
-Removes both skill locations. Leaves `~/.agents/handoffs` untouched.
+npm 7 dropped support for uninstall lifecycle hooks, so `npm uninstall -g` on its
+own deletes the package and leaves six symlinks pointing at nothing — which both
+agents will still try to load. Running it in the other order is unrecoverable by
+tooling, because the binary that would clean up has already been removed.
 
-## Spec
+If that already happened, reinstalling repairs it — `postinstall` re-creates every
+link. If you are not reinstalling, delete `~/.agents/skills/{handoff,recall,remember}`
+and the `.claude` equivalents by hand.
 
-Full spec, acceptance criteria, and testing plan: [issue #1](https://github.com/vib795/copilot-memory-everywhere/issues/1).
+`agent-memory doctor` reports broken links by path under `no broken skill links`.
+That catches the case reinstalling does not: links pointing at a global prefix that
+moved, which is what an `nvm` version switch does to a globally installed package.
+
+`uninstall` only removes links that resolve back to this package — a skill you put
+there yourself is left alone. Your notes stay at `~/.agents/memory`: they are plain
+markdown, they outlive the tool that indexed them, and removing them is your call.
+
+## Specs
+
+- [issue #1](https://github.com/vib795/copilot-memory-everywhere/issues/1) — `/handoff`
+- [issue #2](https://github.com/vib795/copilot-memory-everywhere/issues/2) — the memory
+  graph, with a comment listing every place the shipped code diverged from the spec

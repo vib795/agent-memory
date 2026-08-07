@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
-import { execFileSync, execFile } from 'node:child_process';
+import {
+  mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync, readdirSync,
+  symlinkSync,
+} from 'node:fs';
+import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,13 +19,19 @@ const { neighborhood, applyBudget } = await import('../src/graph.js');
 const { buildTree, buildDigest, renderTree } = await import('../src/digest.js');
 const { compact, writeSkillDescription } = await import('../src/compact.js');
 const stale = await import('../src/staleness.js');
-const { setup, skillTargets, packagedSkillsDir, SKILLS } = await import('../src/setup.js');
+const { setup, unlinkSkills, danglingSkillLinks, skillTargets, packagedSkillsDir, SKILLS } =
+  await import('../src/setup.js');
+const { atomicWrite, tempName } = await import('../src/atomic.js');
 const { paths, DEFAULTS, loadConfig, saveConfig } = await import('../src/config.js');
 
 /** The fixture graph, rebuilt from scratch by every test that needs a clean one. */
 function seed() {
   rmSync(paths.notes, { recursive: true, force: true });
   for (const f of [paths.db, `${paths.db}-wal`, `${paths.db}-shm`]) rmSync(f, { force: true });
+  // Deregister every skill path. The setup tests legitimately register the packaged
+  // SKILL.md, which in a checkout is the real repo file, and a later compact would
+  // then rewrite it with fixture data. A suite that mutates its own repo is a bug.
+  saveConfig({ skillPaths: [] });
   writeNote({
     id: 'auth-service', type: 'system', title: 'Auth uses server sessions',
     body: 'Opaque tokens, not JWT. See src/auth/session.js:42.',
@@ -474,6 +483,144 @@ test('setup replaces a plain directory left by an earlier copy install', () => {
     writeFileSync(join(dir, 'recall', 'SKILL.md'), 'stale copy', 'utf8');
     setup({});
     assert.notEqual(readFileSync(join(dir, 'recall', 'SKILL.md'), 'utf8'), 'stale copy');
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// --- atomic writes ---------------------------------------------------------------
+
+test('temp names are unique per call, so two writers cannot collide', () => {
+  const a = tempName('/x/note.md');
+  const b = tempName('/x/note.md');
+  assert.notEqual(a, b);
+  assert.ok(a.includes(String(process.pid)), 'the pid distinguishes processes');
+  assert.ok(a.endsWith('.tmp'), 'still matches the *.tmp ignore rule');
+});
+
+test('atomicWrite replaces an existing file and leaves no residue', () => {
+  const target = join(ROOT, 'atomic-target.txt');
+  atomicWrite(target, 'first');
+  atomicWrite(target, 'second');
+  assert.equal(readFileSync(target, 'utf8'), 'second');
+  assert.equal(
+    readdirSync(ROOT).filter((f) => f.startsWith('atomic-target') && f.endsWith('.tmp')).length,
+    0,
+  );
+});
+
+test('concurrent writes to the SAME note leave it parseable, with no temp residue', async () => {
+  seed().close();
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  // The earlier concurrency test used different ids, which is why a shared
+  // <target>.tmp survived it. Contending on one target is the case that matters.
+  const run = (body) =>
+    new Promise((resolve, reject) => {
+      const file = join(ROOT, `same-${body}.json`);
+      writeFileSync(
+        file,
+        JSON.stringify({ id: 'same-target', type: 'system', title: 'Contended note', body, repos: ['repo-a'] }),
+        'utf8',
+      );
+      execFile(
+        process.execPath,
+        [cli, 'write', '--from-json', file, '--json'],
+        { env: { ...process.env, AGENT_MEMORY_HOME: ROOT } },
+        (err, stdout, stderr) =>
+          err ? reject(new Error(`${body} exited ${err.code}: ${stderr || stdout}`)) : resolve(stdout),
+      );
+    });
+
+  await Promise.all(['alpha', 'beta', 'gamma', 'delta'].map(run));
+
+  const note = readNote('system', 'same-target');
+  assert.ok(note, 'the note survived four simultaneous writers');
+  assert.ok(['alpha', 'beta', 'gamma', 'delta'].includes(note.body), `body was ${JSON.stringify(note.body)}`);
+  assert.equal(listNotes().filter((n) => n.__error).length, 0, 'nothing was left half-written');
+  assert.equal(
+    readdirSync(paths.typeDir('system')).filter((f) => f.endsWith('.tmp')).length,
+    0,
+    'no orphaned temp file',
+  );
+});
+
+// --- archived retrieval ------------------------------------------------------------
+
+test('get on an archived node says so rather than returning nothing', () => {
+  seed().close();
+  writeNote({
+    id: 'replacement', type: 'decision', title: 'Replaces the old one',
+    body: 'Why: better. Rejected: the old way.', repos: ['repo-a'], supersedes: 'use-jwt',
+  });
+  compact();
+
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const run = (args) => {
+    const res = spawnSync(process.execPath, [cli, ...args], {
+      env: { ...process.env, AGENT_MEMORY_HOME: ROOT },
+      encoding: 'utf8',
+    });
+    return { status: res.status, out: res.stdout + res.stderr };
+  };
+
+  const plain = run(['get', 'use-jwt']);
+  assert.notEqual(plain.status, 0, 'an archived node is not a silent empty success');
+  assert.match(plain.out, /archived/);
+  assert.match(plain.out, /--include-archived/, 'it names the flag that would work');
+
+  const withFlag = run(['get', 'use-jwt', '--include-archived']);
+  assert.equal(withFlag.status, 0);
+  assert.match(withFlag.out, /Rejected JWT for sessions/, 'the body actually comes back');
+});
+
+// --- uninstall ---------------------------------------------------------------------
+
+test('uninstall removes our links, spares a foreign one, and keeps every note', () => {
+  seed().close();
+  const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
+  process.env.AGENT_MEMORY_SKILLS_HOME = home;
+  try {
+    setup({});
+    // Someone else's skill that happens to share a name must survive.
+    const foreign = join(skillTargets()[1], 'handoff');
+    rmSync(foreign, { recursive: true, force: true });
+    mkdirSync(foreign, { recursive: true });
+    writeFileSync(join(foreign, 'NOTES.txt'), 'hand-rolled, not ours', 'utf8');
+
+    const r = unlinkSkills();
+    assert.equal(r.removed.length, 5, 'five of ours removed');
+    assert.deepEqual(r.kept, [foreign], 'the foreign directory is left alone');
+    assert.ok(existsSync(join(foreign, 'NOTES.txt')));
+
+    for (const name of SKILLS) {
+      assert.ok(existsSync(join(packagedSkillsDir(), name, 'SKILL.md')), `packaged ${name} destroyed`);
+    }
+    assert.ok(readNote('system', 'auth-service'), 'notes are never touched by uninstall');
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a link left pointing at a removed package is detected', () => {
+  seed().close();
+  const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
+  process.env.AGENT_MEMORY_SKILLS_HOME = home;
+  try {
+    setup({});
+    assert.deepEqual(danglingSkillLinks(), [], 'a healthy install has none');
+
+    // Exactly what `npm uninstall -g` leaves behind: npm 7 dropped uninstall hooks,
+    // so the package vanishes and the links survive, pointing at nothing.
+    const gone = join(home, 'removed-package', 'skills', 'recall');
+    mkdirSync(gone, { recursive: true });
+    const link = join(skillTargets()[0], 'recall');
+    rmSync(link, { force: true });
+    symlinkSync(gone, link, 'junction');
+    rmSync(join(home, 'removed-package'), { recursive: true, force: true });
+
+    assert.deepEqual(danglingSkillLinks(), [link]);
   } finally {
     delete process.env.AGENT_MEMORY_SKILLS_HOME;
     rmSync(home, { recursive: true, force: true });
