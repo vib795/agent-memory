@@ -5,8 +5,12 @@
   "type": "module",
   "bin": { "agent-memory": "src/cli.js" },
   "engines": { "node": ">=22.5.0" },
-  "scripts": { "test": "node --test" },
-  "files": ["src/", "skills/", "install.sh", "install.ps1", "README.md"],
+  "scripts": {
+    "test": "node --test",
+    "postinstall": "node scripts/postinstall.js",
+    "setup": "node src/cli.js setup"
+  },
+  "files": ["src/", "scripts/", "skills/", "install.sh", "install.ps1", "README.md"],
   "license": "MIT",
   "private": true
 }

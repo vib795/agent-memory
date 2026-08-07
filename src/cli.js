@@ -10,6 +10,7 @@ import { neighborhood, applyBudget } from './graph.js';
 import { buildTree, renderTree, buildDigest } from './digest.js';
 import { compact, maybeCompact } from './compact.js';
 import { staleness, currentRepo, reviewCandidates } from './staleness.js';
+import { setup as runSetup } from './setup.js';
 
 /**
  * One process, one answer.
@@ -66,6 +67,8 @@ function git(args, cwd = process.cwd()) {
 
 const USAGE = `agent-memory — durable cross-repo knowledge for coding agents
 
+  setup                                  link all three skills, build the store
+                                         (runs automatically on npm install)
   init [--skills "<p1>,<p2>"]            create the store; register skill files
   index                                  rebuild index.db from notes/
   tree [--repo <name>] [--all]           routing map, scoped to a repo
@@ -109,6 +112,32 @@ function cmdInit(opts) {
       `${result.indexed} notes indexed.`,
       ...registered.map((s) => `registered skill ${s}`),
     ].join('\n'),
+  };
+}
+
+/**
+ * Link the skills into both agents and build the store.
+ *
+ * Runs automatically from npm postinstall, but exists as a command because managed
+ * npm configurations often set `ignore-scripts=true`, which skips postinstall with
+ * no warning. When that happens the recovery is one command rather than hunting for
+ * a shell script inside a global node_modules directory.
+ */
+function cmdSetup() {
+  ensureStore();
+  const r = runSetup({ compactFn: () => compact() });
+  const lines = r.installed.map((s) => `  [${s.mode === 'link' ? 'link' : 'copy'}] ${s.path}`);
+  if (r.copies.length) {
+    lines.push(
+      '',
+      'Some skills were copied rather than linked, which happens on a network-backed',
+      'profile. Re-run `agent-memory setup` after upgrading the package to refresh them.',
+    );
+  }
+  return {
+    ok: true,
+    ...r,
+    text: ['Installed skills:', ...lines, '', `Store ready at ${paths.root} (${r.notes} notes).`].join('\n'),
   };
 }
 
@@ -366,8 +395,8 @@ function cmdDoctor() {
   const skillsFound = registered.filter((p) => existsSync(p));
   add(
     'skills linked',
-    skillsFound.length === registered.length,
-    registered.length ? skillsFound.join(', ') : 'none registered; run install',
+    registered.length > 0 && skillsFound.length === registered.length,
+    registered.length ? skillsFound.join(', ') : 'none registered; run `agent-memory setup`',
   );
 
   const stale = reviewCandidates(db, { cfg });
@@ -394,6 +423,7 @@ function cmdDoctor() {
 // --- dispatch ---------------------------------------------------------------
 
 const COMMANDS = {
+  setup: cmdSetup,
   init: cmdInit,
   index: cmdIndex,
   tree: cmdTree,

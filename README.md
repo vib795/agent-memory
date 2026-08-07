@@ -92,17 +92,54 @@ Every command takes `--json`. Every cap lives in `config.json` and is tunable.
 
 ## Install
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-```
+Installing the package installs everything — the CLI, all three skills, and the
+store. There is no second step.
 
 ```bash
-./install.sh
+npm install -g https://github.com/vib795/copilot-memory-everywhere.git
 ```
 
-Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old.
+The `postinstall` hook links `handoff`, `recall` and `remember` into both agent
+directories (`~/.agents/skills` and `~/.claude/skills`, or `%USERPROFILE%\...` on
+Windows), creates the store, and generates the routing digest. Restart VS Code and
+`/recall`, `/remember` and `/handoff` are all live.
 
-Run `npm test` for the suite (54 tests, no dependencies).
+Windows uses directory junctions, which need neither admin rights nor Developer
+Mode. On a network-backed profile (FSLogix, roaming) junctions fail and the skills
+are copied instead — setup says which one you got, and copies need
+`agent-memory setup` re-run after each upgrade.
+
+### If nothing appears to happen
+
+Managed npm configurations often set `ignore-scripts=true`, which skips
+`postinstall` with no warning at all. One command fixes it:
+
+```bash
+agent-memory setup
+```
+
+`agent-memory doctor` reports `skills linked: none registered` when this is the
+situation, so it is visible rather than mysterious.
+
+### From a clone
+
+```bash
+./install.sh                                          # macOS / Linux
+powershell -ExecutionPolicy Bypass -File .\install.ps1 # Windows
+```
+
+Both are thin wrappers over `agent-memory setup`; the linking logic lives in
+`src/setup.js` so there is one implementation rather than three that drift.
+
+Note that `npm install -g .` from a clone *symlinks* rather than copies, so
+`compact` regenerates the description in your working tree and
+`skills/recall/SKILL.md` will show as modified. That is expected — the description
+is generated state, and the committed value is only a placeholder.
+
+Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old, and
+`postinstall` refuses rather than failing your install.
+
+Run `npm test` for the suite (59 tests, no dependencies).
 
 ## It is not a chat summary
 

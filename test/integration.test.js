@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync, execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +16,8 @@ const { neighborhood, applyBudget } = await import('../src/graph.js');
 const { buildTree, buildDigest, renderTree } = await import('../src/digest.js');
 const { compact, writeSkillDescription } = await import('../src/compact.js');
 const stale = await import('../src/staleness.js');
-const { paths, DEFAULTS } = await import('../src/config.js');
+const { setup, skillTargets, packagedSkillsDir, SKILLS } = await import('../src/setup.js');
+const { paths, DEFAULTS, loadConfig, saveConfig } = await import('../src/config.js');
 
 /** The fixture graph, rebuilt from scratch by every test that needs a clean one. */
 function seed() {
@@ -398,6 +399,85 @@ test('two ids describing the same thing warn, and the write still lands', async 
 
   assert.ok(second.warnings.some((w) => /title collision/.test(w) && /collide-a/.test(w)), JSON.stringify(second.warnings));
   assert.ok(readNote('system', 'collide-b'), 'the warning does not block the write');
+});
+
+// --- skill installation ---------------------------------------------------------
+
+test('setup links all three skills into both agent directories', () => {
+  seed().close();
+  const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
+  process.env.AGENT_MEMORY_SKILLS_HOME = home;
+  try {
+    const r = setup({});
+    assert.equal(r.installed.length, 6, 'three skills across two agent directories');
+    for (const dir of skillTargets()) {
+      for (const name of SKILLS) {
+        assert.ok(existsSync(join(dir, name, 'SKILL.md')), `${name} missing from ${dir}`);
+      }
+    }
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('setup registers recall and nothing else', () => {
+  seed().close();
+  const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
+  process.env.AGENT_MEMORY_SKILLS_HOME = home;
+  try {
+    saveConfig({ skillPaths: [] });
+    const r = setup({});
+    // compact overwrites the description of every registered path. handoff and
+    // remember describe themselves, so registering them would destroy both.
+    assert.deepEqual(r.skillPaths, [join(packagedSkillsDir(), 'recall', 'SKILL.md')]);
+    assert.ok(!JSON.stringify(loadConfig().skillPaths).includes('handoff'));
+    assert.ok(!JSON.stringify(loadConfig().skillPaths).includes('remember'));
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('setup is idempotent, and replacing a link never deletes the source', () => {
+  seed().close();
+  const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
+  process.env.AGENT_MEMORY_SKILLS_HOME = home;
+  try {
+    setup({});
+    setup({});
+    setup({});
+    for (const dir of skillTargets()) {
+      for (const name of SKILLS) assert.ok(existsSync(join(dir, name, 'SKILL.md')));
+    }
+    // The real hazard: clearing a stale link must remove the link, not follow it and
+    // empty the packaged skills on the other end.
+    for (const name of SKILLS) {
+      assert.ok(
+        existsSync(join(packagedSkillsDir(), name, 'SKILL.md')),
+        `packaged ${name} was destroyed by re-linking`,
+      );
+    }
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('setup replaces a plain directory left by an earlier copy install', () => {
+  seed().close();
+  const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
+  process.env.AGENT_MEMORY_SKILLS_HOME = home;
+  try {
+    const dir = skillTargets()[0];
+    mkdirSync(join(dir, 'recall'), { recursive: true });
+    writeFileSync(join(dir, 'recall', 'SKILL.md'), 'stale copy', 'utf8');
+    setup({});
+    assert.notEqual(readFileSync(join(dir, 'recall', 'SKILL.md'), 'utf8'), 'stale copy');
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 // --- documentation consistency --------------------------------------------------
