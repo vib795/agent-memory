@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -54,4 +54,39 @@ export function loadConfig() {
     // A malformed config must not take the store down. Defaults are always valid.
     return { ...DEFAULTS, skillPaths: [] };
   }
+}
+
+/**
+ * Merge a patch into config.json.
+ *
+ * Lives here rather than in the install scripts so that bash and PowerShell do not
+ * each grow their own JSON merge, which is exactly the kind of duplication that
+ * drifts and only shows up on the machine you cannot test from.
+ *
+ * Only keys that already mean something are persisted, so a typo in an installer
+ * cannot quietly become permanent state.
+ */
+export function saveConfig(patch) {
+  const current = existsSync(paths.config)
+    ? (() => {
+        try {
+          return JSON.parse(readFileSync(paths.config, 'utf8'));
+        } catch {
+          return {};
+        }
+      })()
+    : {};
+
+  const next = { ...current };
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (k in DEFAULTS && typeof v === 'number' && Number.isFinite(v) && v > 0) next[k] = v;
+    if (LIST_KEYS.includes(k) && Array.isArray(v)) {
+      next[k] = [...new Set(v.filter((s) => typeof s === 'string' && s.trim()))].sort();
+    }
+  }
+
+  const tmp = `${paths.config}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  renameSync(tmp, paths.config);
+  return next;
 }

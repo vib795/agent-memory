@@ -1,0 +1,386 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { execFileSync, execFile } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = mkdtempSync(join(tmpdir(), 'agent-memory-int-'));
+process.env.AGENT_MEMORY_HOME = ROOT;
+process.on('exit', () => rmSync(ROOT, { recursive: true, force: true }));
+
+const { writeNote, listNotes, notePath, readNote } = await import('../src/store.js');
+const idx = await import('../src/index-db.js');
+const { neighborhood, applyBudget } = await import('../src/graph.js');
+const { buildTree, buildDigest, renderTree } = await import('../src/digest.js');
+const { compact, writeSkillDescription } = await import('../src/compact.js');
+const stale = await import('../src/staleness.js');
+const { paths, DEFAULTS } = await import('../src/config.js');
+
+/** The fixture graph, rebuilt from scratch by every test that needs a clean one. */
+function seed() {
+  rmSync(paths.notes, { recursive: true, force: true });
+  for (const f of [paths.db, `${paths.db}-wal`, `${paths.db}-shm`]) rmSync(f, { force: true });
+  writeNote({
+    id: 'auth-service', type: 'system', title: 'Auth uses server sessions',
+    body: 'Opaque tokens, not JWT. See src/auth/session.js:42.',
+    repos: ['repo-a'],
+    edges: [{ rel: 'depends-on', dst: 'postgres-primary' }, { rel: 'contradicts', dst: 'use-jwt' }],
+  });
+  writeNote({
+    id: 'use-jwt', type: 'decision', title: 'Rejected JWT for sessions',
+    body: 'x'.repeat(4000), repos: ['repo-a'],
+    edges: [{ rel: 'contradicts', dst: 'auth-service' }],
+  });
+  writeNote({
+    id: 'postgres-primary', type: 'system', title: 'Primary Postgres',
+    body: 'y'.repeat(4000), repos: ['repo-a'],
+    edges: [{ rel: 'applies-to', dst: 'auth-service' }],
+  });
+  writeNote({
+    id: 'no-external-db', type: 'constraint', title: 'No externally hosted databases',
+    body: 'z'.repeat(4000), repos: [], scope: 'global',
+    edges: [{ rel: 'applies-to', dst: 'postgres-primary' }],
+  });
+  return idx.openDb();
+}
+
+// --- index and traversal ------------------------------------------------------
+
+test('reindex is idempotent and reports nothing malformed', () => {
+  const db = seed();
+  assert.equal(idx.reindex(db).indexed, 4);
+  assert.equal(idx.reindex(db).indexed, 4);
+  assert.deepEqual(idx.reindex(db).malformed, []);
+  db.close();
+});
+
+test('a malformed note does not blind the rest of the index', () => {
+  const db = seed();
+  const broken = join(paths.typeDir('system'), 'broken.md');
+  writeFileSync(broken, 'no frontmatter here', 'utf8');
+  const r = idx.reindex(db);
+  assert.equal(r.indexed, 4, 'the four good notes still index');
+  assert.equal(r.malformed.length, 1);
+  rmSync(broken, { force: true });
+  db.close();
+});
+
+test('traversal reaches each depth and stops where told', () => {
+  const db = seed();
+  assert.deepEqual(
+    neighborhood(db, 'auth-service', { depth: 1 }).map((n) => n.id).sort(),
+    ['auth-service', 'postgres-primary', 'use-jwt'],
+  );
+  assert.ok(
+    neighborhood(db, 'auth-service', { depth: 2 }).map((n) => n.id).includes('no-external-db'),
+  );
+  db.close();
+});
+
+test('a contradicts cycle terminates and never repeats a node', () => {
+  const db = seed();
+  const ids = neighborhood(db, 'auth-service', { depth: 3 }).map((n) => n.id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal(ids[0], 'auth-service');
+  db.close();
+});
+
+test('a node reachable at two depths is reported at the shorter one', () => {
+  const db = seed();
+  const hood = neighborhood(db, 'auth-service', { depth: 3 });
+  assert.equal(hood.find((n) => n.id === 'postgres-primary').depth, 1);
+  db.close();
+});
+
+test('an orphan node returns only itself', () => {
+  const db = seed();
+  writeNote({ id: 'orphan', type: 'convention', title: 'Lone note', body: 'No edges.', repos: ['repo-a'] });
+  idx.reindex(db);
+  assert.deepEqual(neighborhood(db, 'orphan', { depth: 3 }).map((n) => n.id), ['orphan']);
+  db.close();
+});
+
+test('deleting the index and rebuilding reproduces identical output', () => {
+  const db = seed();
+  const snapshot = (d) =>
+    JSON.stringify({
+      hood: neighborhood(d, 'auth-service', { depth: 3 }),
+      tree: buildTree(d, { all: true }),
+      search: idx.searchNodes(d, 'sessions'),
+    });
+  const before = snapshot(db);
+  db.close();
+  for (const f of [paths.db, `${paths.db}-wal`, `${paths.db}-shm`]) rmSync(f, { force: true });
+  const db2 = idx.openDb();
+  assert.equal(before, snapshot(db2));
+  db2.close();
+});
+
+// --- retrieval budget ----------------------------------------------------------
+
+test('budget prunes by depth then degree, keeps the root and every constraint', () => {
+  const db = seed();
+  const hood = neighborhood(db, 'auth-service', { depth: 3 });
+  const { kept, omitted, overBudget } = applyBudget(hood, 2000);
+  const ids = kept.map((n) => n.id);
+  assert.ok(ids.includes('auth-service'), 'root is never dropped');
+  assert.ok(ids.includes('no-external-db'), 'a constraint is never dropped');
+  assert.ok(omitted.length > 0);
+  assert.ok(omitted.every((o) => typeof o.id === 'string'), 'omitted ids are always named');
+  assert.equal(overBudget, true, 'going over is reported rather than hidden');
+  db.close();
+});
+
+test('budget is a no-op when everything fits', () => {
+  const db = seed();
+  const hood = neighborhood(db, 'auth-service', { depth: 1 });
+  const r = applyBudget(hood, 1_000_000);
+  assert.equal(r.omitted.length, 0);
+  assert.equal(r.kept.length, hood.length);
+  db.close();
+});
+
+// --- tree and digest -----------------------------------------------------------
+
+test('repo scoping returns that repo plus global notes and nothing else', () => {
+  const db = seed();
+  writeNote({ id: 'other-repo-note', type: 'system', title: 'Elsewhere', body: 'b', repos: ['repo-b'] });
+  idx.reindex(db);
+  const ids = buildTree(db, { repo: 'repo-a', all: true }).lines.map((l) => l.id);
+  assert.ok(ids.includes('auth-service'));
+  assert.ok(ids.includes('no-external-db'), 'a global constraint applies here too');
+  assert.ok(!ids.includes('other-repo-note'));
+  db.close();
+});
+
+test('tree truncation keeps constraints, drops low-degree notes, and says how many', () => {
+  const db = seed();
+  for (let i = 0; i < 20; i++) {
+    writeNote({ id: `filler-${i}`, type: 'system', title: `Filler ${i}`, body: 'b', repos: ['repo-a'] });
+  }
+  idx.reindex(db);
+  const cfg = { ...DEFAULTS, treeLines: 8 };
+  const r = buildTree(db, { repo: 'repo-a', cfg });
+  assert.equal(r.truncated, true);
+  assert.ok(r.lines.some((l) => l.type === 'constraint'), 'constraints survive any cap');
+  assert.ok(r.omitted.length > 0);
+  assert.match(renderTree(r), /nodes not shown, run agent-memory tree --all/);
+  assert.equal(buildTree(db, { repo: 'repo-a', all: true, cfg }).omitted.length, 0);
+  db.close();
+});
+
+test('digest stays within the cap and always keeps the routing clause', () => {
+  const db = seed();
+  const cfg = { ...DEFAULTS, digestChars: 200 };
+  const d = buildDigest(db, { cfg });
+  assert.ok(d.length <= 200, `digest was ${d.length} chars`);
+  assert.match(d, /Use when you need to know/);
+  assert.match(d, /1 constraint/, 'the constraint count is never dropped');
+  db.close();
+});
+
+test('digest of an empty store says so instead of pretending', () => {
+  rmSync(paths.notes, { recursive: true, force: true });
+  for (const f of [paths.db, `${paths.db}-wal`, `${paths.db}-shm`]) rmSync(f, { force: true });
+  const db = idx.openDb();
+  assert.match(buildDigest(db), /currently empty/);
+  db.close();
+});
+
+// --- write path ----------------------------------------------------------------
+
+test('writing an existing id updates in place rather than adding a note', () => {
+  const db = seed();
+  const first = writeNote({
+    id: 'auth-service', type: 'system', title: 'Auth uses server sessions',
+    body: 'Changed.', repos: ['repo-b'],
+  });
+  assert.equal(first.created, false, 'an existing id is an update, not a create');
+  idx.reindex(db);
+  assert.equal(idx.nodeCount(db, { includeArchived: true }), 4);
+  assert.deepEqual(idx.getNodeRow(db, 'auth-service').repos, ['repo-b']);
+  db.close();
+});
+
+test('a secret never reaches disk, not even once', () => {
+  const db = seed();
+  const res = writeNote({
+    id: 'leaky', type: 'system', title: 'Connection details',
+    body: 'postgres://admin:hunter2@db.example.com:5432/app', repos: ['repo-a'],
+  });
+  assert.ok(res.findings.some((f) => f.kind === 'connection-string'));
+  const onDisk = readFileSync(notePath('system', 'leaky'), 'utf8');
+  assert.ok(!onDisk.includes('hunter2'));
+  assert.ok(onDisk.includes('<redacted:connection-string>'));
+  assert.ok(!existsSync(`${notePath('system', 'leaky')}.tmp`), 'no temp file is left behind');
+  db.close();
+});
+
+// --- compaction ----------------------------------------------------------------
+
+test('identical content merges, unions repos, and repoints inbound edges', () => {
+  seed().close();
+  writeNote({
+    id: 'auth-copy', type: 'system', title: 'Auth uses server sessions',
+    body: 'Opaque tokens, not JWT. See src/auth/session.js:42.', repos: ['repo-b'],
+  });
+  writeNote({
+    id: 'points-at-copy', type: 'convention', title: 'Points at the copy',
+    body: 'b', repos: ['repo-a'], edges: [{ rel: 'depends-on', dst: 'auth-copy' }],
+  });
+
+  const r = compact();
+  assert.equal(r.merged.length, 1);
+  assert.equal(r.merged[0].into, 'auth-service');
+  assert.ok(readNote('system', 'auth-copy', true), 'the duplicate is archived, never deleted');
+  assert.deepEqual(readNote('system', 'auth-service').repos, ['repo-a', 'repo-b']);
+  assert.deepEqual(
+    readNote('convention', 'points-at-copy').edges,
+    [{ rel: 'depends-on', dst: 'auth-service' }],
+    'an inbound edge follows the merge instead of dangling',
+  );
+});
+
+test('a superseded node is archived but stays reachable', () => {
+  seed().close();
+  writeNote({
+    id: 'use-sessions', type: 'decision', title: 'Chose sessions',
+    body: 'Why: immediate revocation. Rejected: JWT.', repos: ['repo-a'], supersedes: 'use-jwt',
+  });
+
+  const r = compact();
+  assert.ok(r.superseded.some((s) => s.id === 'use-jwt' && s.by === 'use-sessions'));
+  assert.equal(readNote('decision', 'use-jwt'), null, 'gone from active');
+  const archived = readNote('decision', 'use-jwt', true);
+  assert.ok(archived, 'still on disk');
+  assert.equal(archived.edges.length, 1, 'it keeps its edges');
+
+  const db = idx.openDb();
+  assert.ok(
+    neighborhood(db, 'auth-service', { depth: 1, includeArchived: true }).some((n) => n.id === 'use-jwt'),
+  );
+  assert.ok(!neighborhood(db, 'auth-service', { depth: 1 }).some((n) => n.id === 'use-jwt'));
+  db.close();
+});
+
+test('decay archives the unread and unreferenced, and spares the referenced', () => {
+  seed().close();
+  writeNote({ id: 'forgotten', type: 'convention', title: 'Nobody reads this', body: 'b', repos: ['repo-a'] });
+
+  // 100 days on, with decayDays at its default of 90.
+  const r = compact({ now: Date.now() + 100 * 86400000 });
+  assert.ok(r.decayed.some((d) => d.id === 'forgotten'));
+  assert.ok(!r.decayed.some((d) => d.id === 'postgres-primary'), 'inbound edges exempt a node');
+  assert.ok(readNote('convention', 'forgotten', true), 'archived, not deleted');
+});
+
+test('compact regenerates ROUTING.md and the registered skill description', () => {
+  seed().close();
+  const skill = join(ROOT, 'FAKE_SKILL.md');
+  writeFileSync(skill, '---\nname: recall\ndescription: placeholder\n---\n\n# body\n', 'utf8');
+
+  const r = compact({ cfg: { ...DEFAULTS, skillPaths: [skill] } });
+  assert.deepEqual(r.skills, [skill]);
+  const written = readFileSync(skill, 'utf8');
+  assert.ok(written.includes(`description: ${JSON.stringify(r.digest)}`));
+  assert.ok(written.includes('# body'), 'the body below the frontmatter is untouched');
+  assert.ok(existsSync(paths.routing));
+  assert.ok(readFileSync(paths.routing, 'utf8').includes('auth-service'));
+});
+
+test('writeSkillDescription refuses a file without frontmatter', () => {
+  const plain = join(ROOT, 'PLAIN.md');
+  writeFileSync(plain, '# no frontmatter\n', 'utf8');
+  assert.equal(writeSkillDescription(plain, 'x'), false);
+  assert.equal(writeSkillDescription(join(ROOT, 'missing.md'), 'x'), false);
+});
+
+// --- staleness -----------------------------------------------------------------
+
+test('commit counts, thresholds, and a rewritten history', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'agent-memory-repo-'));
+  const git = (...args) =>
+    execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'Test');
+  writeFileSync(join(repo, 'a.txt'), 'one', 'utf8');
+  git('add', '.');
+  git('commit', '-qm', 'first');
+  const first = git('rev-parse', 'HEAD');
+
+  for (let i = 0; i < 12; i++) {
+    writeFileSync(join(repo, 'a.txt'), `v${i}`, 'utf8');
+    git('add', '.');
+    git('commit', '-qm', `c${i}`);
+  }
+
+  stale.resetCache();
+  const name = repo.split('/').pop();
+  assert.equal(stale.currentRepo(repo), name);
+  assert.deepEqual(stale.commitsSince(first, repo), { status: 'ok', count: 12 });
+  assert.equal(stale.commitsSince('deadbeefdeadbeef', repo).status, 'unreachable');
+
+  assert.match(stale.annotate({ captured_sha: first, repos: [name] }, { cwd: repo }), /captured 12 commits ago/);
+  assert.equal(
+    stale.annotate({ captured_sha: git('rev-parse', 'HEAD'), repos: [name] }, { cwd: repo }),
+    null,
+    'zero commits behind is silent',
+  );
+  assert.equal(
+    stale.annotate({ captured_sha: 'deadbeefdeadbeef', repos: [name] }, { cwd: repo }),
+    'history rewritten, verify',
+  );
+  assert.equal(
+    stale.annotate({ captured_sha: 'deadbeefdeadbeef', repos: ['some-other-repo'] }, { cwd: repo }),
+    null,
+    "another project's history is not ours to judge",
+  );
+  rmSync(repo, { recursive: true, force: true });
+  stale.resetCache();
+});
+
+// --- concurrency ---------------------------------------------------------------
+
+test('two concurrent writes both land, with no partial note left behind', async () => {
+  seed().close();
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const run = (id) =>
+    new Promise((resolve, reject) => {
+      const file = join(ROOT, `${id}.json`);
+      writeFileSync(
+        file,
+        JSON.stringify({ id, type: 'system', title: `Concurrent ${id}`, body: 'b', repos: ['repo-a'] }),
+        'utf8',
+      );
+      execFile(
+        process.execPath,
+        [cli, 'write', '--from-json', file, '--json'],
+        { env: { ...process.env, AGENT_MEMORY_HOME: ROOT } },
+        (err, stdout) => (err ? reject(err) : resolve(stdout)),
+      );
+    });
+
+  await Promise.all([run('concurrent-a'), run('concurrent-b')]);
+  const notes = listNotes();
+  const ids = notes.filter((n) => !n.__error).map((n) => n.id);
+  assert.ok(ids.includes('concurrent-a'));
+  assert.ok(ids.includes('concurrent-b'));
+  assert.equal(notes.filter((n) => n.__error).length, 0, 'no half-written note');
+});
+
+// --- documentation consistency --------------------------------------------------
+
+test('the extraction rules are identical in both skills', () => {
+  // They are duplicated on purpose: a skill has to be self-contained in one turn.
+  // This test is what stops the two copies drifting apart unnoticed.
+  const block = (file) => {
+    const src = readFileSync(new URL(file, import.meta.url), 'utf8');
+    const m = src.match(/<!-- extraction-rules:start -->([\s\S]*?)<!-- extraction-rules:end -->/);
+    assert.ok(m, `no extraction-rules block in ${file}`);
+    return m[1];
+  };
+  assert.equal(block('../skills/remember/SKILL.md'), block('../skills/handoff/SKILL.md'));
+});

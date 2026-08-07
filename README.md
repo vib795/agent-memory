@@ -1,11 +1,15 @@
 # copilot-memory-everywhere
 
-Continue a chat thread in a different VS Code window, on a different repo, without
-re-explaining it.
+Give **GitHub Copilot** and **Claude Code** a memory that outlives the window, the
+repository, and the week — using nothing an IT security review would need to approve.
 
-One user-level Agent Skill, `/handoff`, that both **GitHub Copilot** and
-**Claude Code** can invoke from a single file. It writes a portable working-state
-file outside every repository, so a window opened on a different project can read it.
+Three user-level Agent Skills over one local store:
+
+| Skill | What it does |
+|---|---|
+| `/handoff` | Writes a portable working-state file so another window can pick up this thread |
+| `/remember` | Captures durable knowledge into a cross-repo graph |
+| `/recall` | Answers from that graph before deriving anything again |
 
 ## Why this exists
 
@@ -21,6 +25,84 @@ Nothing in the platform closes the gap:
 | `/fork` | Copies a conversation inside one workspace |
 | Prompt files in `.github/prompts/` | Workspace-scoped, so every repo needs its own copy |
 | Third-party memory plugins | Blocked in many managed environments |
+
+## Zero runtime dependencies
+
+`node:sqlite` has shipped inside Node core since 22.5, so the graph index needs no
+package, no service, and no network. `npm ls -g --depth 0` shows nothing under it.
+On a locked-down desktop that is the difference between "a Node script" and "a new
+database", which is the entire argument you will have to make to get this approved.
+
+- **Markdown is the source of truth.** `index.db` is a disposable cache; delete it
+  and `agent-memory index` rebuilds it byte-identically.
+- **Nothing leaves the machine.** No daemon, no scheduled task, no telemetry.
+- **Uninstalling leaves readable notes behind.** The store is plain markdown and
+  stays useful with no tooling at all.
+
+## The memory graph
+
+Notes live at `%USERPROFILE%\.agents\memory\notes\<type>\<id>.md`, outside every
+repository — that is what makes a note written in one project readable from another.
+
+```yaml
+id: auth-service
+type: system            # system | decision | convention | constraint
+title: Auth uses server sessions
+scope: repo             # repo | global
+confidence: observed    # observed | inferred
+captured_sha: a1b2c3d   # repo HEAD at capture; drives the staleness signal
+repos: [orders-api]
+edges:
+  - rel: depends-on     # depends-on | applies-to | supersedes | contradicts | evidence-for
+    dst: postgres-primary
+```
+
+Traversal is a SQLite recursive CTE. There is no graph layer on top of SQLite; the
+recursive CTE *is* the graph engine, and `UNION` plus a depth bound is what keeps a
+`contradicts` cycle from recursing forever.
+
+### What keeps it honest
+
+- **Staleness is visible at the moment of use.** Every note records the repo HEAD it
+  was captured at. On recall, `get` prints `captured 47 commits ago — verify before
+  trusting`. A note that quietly rots is worse than no note.
+- **Redaction is fail-closed.** Keys, tokens, connection strings, private keys,
+  session cookies, internal hosts and foreign email addresses are replaced before any
+  byte reaches disk — not to a note, not to a temp file, not to the index.
+- **Truncation is never silent.** Whenever the tree or the retrieval budget drops
+  something, the omitted ids are printed. Silent truncation reads as full coverage.
+- **Constraints are never dropped.** At any cap, in either tier. A constraint is what
+  stops an agent burning a retry loop on an approach that was never going to ship.
+
+## CLI
+
+```
+agent-memory init [--skills "<p1>,<p2>"]   create the store, register skill files
+agent-memory index                         rebuild index.db from notes/
+agent-memory tree [--repo <name>] [--all]  routing map, scoped to a repo
+agent-memory get <id> [--depth N]          a note plus its neighborhood
+                     [--budget N] [--include-archived]
+agent-memory search <terms> [--limit N]    full-text fallback when the tree misses
+agent-memory write --from-json <file>      validated upsert; used by the skills
+agent-memory compact                       dedup, decay, reindex, regenerate
+agent-memory doctor                        preflight and health report
+```
+
+Every command takes `--json`. Every cap lives in `config.json` and is tunable.
+
+## Install
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+```bash
+./install.sh
+```
+
+Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old.
+
+Run `npm test` for the suite (54 tests, no dependencies).
 
 ## It is not a chat summary
 
