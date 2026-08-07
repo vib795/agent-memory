@@ -334,7 +334,8 @@ npm uninstall -g @vib795/agent-memory
 
 If you do it the other way round, npm deletes the program *including the part that
 cleans up*, and your AI tools are left with commands that point at nothing. If that has
-already happened, reinstalling repairs it.
+already happened, install it again and run `agent-memory setup` — that clears the dead
+commands and puts working ones back.
 
 Your notes are untouched either way. They are at `~/.agents/memory`, they are plain
 text, and deleting them is your decision to make, not the uninstaller's.

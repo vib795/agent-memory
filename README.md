@@ -281,9 +281,11 @@ own deletes the package and leaves a symlink per skill per agent pointing at not
 order is unrecoverable by
 tooling, because the binary that would clean up has already been removed.
 
-If that already happened, reinstalling repairs it — `postinstall` re-creates every
-link. If you are not reinstalling, delete `~/.agents/skills/{handoff,recall,remember}`
-and the `.claude` equivalents by hand.
+If that already happened, reinstalling and re-running `agent-memory setup` repairs it:
+`setup` clears each stale link before writing the new one. Reinstalling alone is not
+enough unless you passed `--allow-scripts`, since that is the same hook npm declines to
+run. If you are not reinstalling, delete `~/.agents/skills/{handoff,recall,remember}`
+and the equivalents under the other agent directories by hand.
 
 `agent-memory doctor` reports broken links by path under `no broken skill links`.
 That catches the case reinstalling does not: links pointing at a global prefix that
