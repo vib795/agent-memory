@@ -1,0 +1,12 @@
+{
+  "name": "agent-memory",
+  "version": "0.1.0",
+  "description": "Durable cross-repo knowledge graph for GitHub Copilot and Claude Code. Markdown source of truth, disposable SQLite index, zero runtime dependencies.",
+  "type": "module",
+  "bin": { "agent-memory": "src/cli.js" },
+  "engines": { "node": ">=22.5.0" },
+  "scripts": { "test": "node --test test/" },
+  "files": ["src/", "skills/", "install.sh", "install.ps1", "README.md"],
+  "license": "MIT",
+  "private": true
+}
