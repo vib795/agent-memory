@@ -1,6 +1,6 @@
-# copilot-memory-everywhere
+# agent-memory
 
-[![test](https://github.com/vib795/copilot-memory-everywhere/actions/workflows/test.yml/badge.svg)](https://github.com/vib795/copilot-memory-everywhere/actions/workflows/test.yml)
+[![test](https://github.com/vib795/agent-memory/actions/workflows/test.yml/badge.svg)](https://github.com/vib795/agent-memory/actions/workflows/test.yml)
 [![node](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)](https://nodejs.org)
 [![dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](package.json)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -107,7 +107,7 @@ agent-memory setup
 Straight from git works too, and needs no registry access:
 
 ```bash
-npm install -g https://github.com/vib795/copilot-memory-everywhere.git
+npm install -g https://github.com/vib795/agent-memory.git
 agent-memory setup
 ```
 
@@ -151,7 +151,9 @@ is generated state, and the committed value is only a placeholder.
 Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old, and
 `postinstall` refuses rather than failing your install.
 
-Run `npm test` for the suite (59 tests, no dependencies).
+Run `npm test` for the suite (68 tests, no dependencies). CI runs it on Linux,
+macOS and Windows across Node 22 and 24, and separately installs the packed tarball
+and exercises it end to end on all three.
 
 ## It is not a chat summary
 
@@ -272,6 +274,6 @@ markdown, they outlive the tool that indexed them, and removing them is your cal
 
 ## Specs
 
-- [issue #1](https://github.com/vib795/copilot-memory-everywhere/issues/1) — `/handoff`
-- [issue #2](https://github.com/vib795/copilot-memory-everywhere/issues/2) — the memory
+- [issue #1](https://github.com/vib795/agent-memory/issues/1) — `/handoff`
+- [issue #4](https://github.com/vib795/agent-memory/issues/4) — the memory
   graph, with a comment listing every place the shipped code diverged from the spec

@@ -11,11 +11,11 @@
     "sqlite",
     "zero-dependencies"
   ],
-  "homepage": "https://github.com/vib795/copilot-memory-everywhere#readme",
-  "bugs": "https://github.com/vib795/copilot-memory-everywhere/issues",
+  "homepage": "https://github.com/vib795/agent-memory#readme",
+  "bugs": "https://github.com/vib795/agent-memory/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vib795/copilot-memory-everywhere.git"
+    "url": "git+https://github.com/vib795/agent-memory.git"
   },
   "author": "Utkarsh Singh (https://github.com/vib795)",
   "type": "module",
