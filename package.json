@@ -19,14 +19,29 @@
   },
   "author": "Utkarsh Singh (https://github.com/vib795)",
   "type": "module",
-  "bin": { "agent-memory": "src/cli.js" },
-  "engines": { "node": ">=22.5.0" },
+  "bin": {
+    "agent-memory": "src/cli.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "test": "node --test",
     "postinstall": "node scripts/postinstall.js",
     "setup": "node src/cli.js setup"
   },
-  "files": ["src/", "scripts/", "skills/", "install.sh", "install.ps1", "README.md", "LICENSE"],
+  "files": [
+    "src/",
+    "scripts/",
+    "skills/",
+    "install.sh",
+    "install.ps1",
+    "README.md",
+    "HOWTO.md",
+    "LICENSE"
+  ],
   "license": "MIT",
-  "publishConfig": { "access": "public" }
+  "publishConfig": {
+    "access": "public"
+  }
 }

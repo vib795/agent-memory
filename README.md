@@ -16,6 +16,10 @@ Three user-level Agent Skills over one local store:
 | `/remember` | Captures durable knowledge into a cross-repo graph |
 | `/recall` | Answers from that graph before deriving anything again |
 
+**New here? Read the [HOW-TO](HOWTO.md)** — install, first five minutes, and the
+per-tool notes for Claude Code, Codex and Copilot, written for people who do not
+want to read the rest of this file.
+
 ## Why this exists
 
 Moving context between windows today means copy-pasting the chat, retyping from
@@ -119,6 +123,7 @@ routing digest.
 |---|---|---|
 | Agent skills (shared convention) | linked skill directory | `~/.agents/skills/<name>/` |
 | Claude Code, CLI and VS Code extension | linked skill directory | `~/.claude/skills/<name>/` |
+| Codex CLI | linked skill directory | `$CODEX_HOME/skills/<name>/` |
 | VS Code, Insiders, VSCodium, Cursor, Windsurf | prompt file | `<user data>/prompts/<name>.prompt.md` |
 | Copilot CLI | *detected, skipped* | it documents no user-global prompt directory; use `.github/copilot-instructions.md` per repo |
 
@@ -166,7 +171,7 @@ is generated state, and the committed value is only a placeholder.
 Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old, and
 `postinstall` refuses rather than failing your install.
 
-Run `npm test` for the suite (68 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (71 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 
@@ -266,13 +271,14 @@ alone. That needs real elapsed time and cannot be faked in a test suite.
 Order matters, and npm will not do it for you:
 
 ```bash
-agent-memory uninstall      # first — removes the six skill links
+agent-memory uninstall      # first — removes every skill link and prompt file
 npm uninstall -g @vib795/agent-memory
 ```
 
 npm 7 dropped support for uninstall lifecycle hooks, so `npm uninstall -g` on its
-own deletes the package and leaves six symlinks pointing at nothing — which both
-agents will still try to load. Running it in the other order is unrecoverable by
+own deletes the package and leaves a symlink per skill per agent pointing at nothing
+— which every one of those agents will still try to load. Running it in the other
+order is unrecoverable by
 tooling, because the binary that would clean up has already been removed.
 
 If that already happened, reinstalling repairs it — `postinstall` re-creates every

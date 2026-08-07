@@ -47,6 +47,18 @@ export function vscodeUserDir(flavourDir, home = agentHome()) {
   return join(home, '.config', flavourDir, 'User');
 }
 
+/**
+ * Codex keeps skills at `$CODEX_HOME/skills/<name>/SKILL.md`, the same layout Claude
+ * Code uses. Observed rather than assumed: its bundled `skill-installer` skill states
+ * the location, and the shipped system skills sit there in exactly that shape.
+ */
+export function codexHome(home = agentHome()) {
+  // As with %APPDATA%, CODEX_HOME points at the real profile, so honouring it under an
+  // overridden home would let a test write into the actual Codex installation.
+  const overridden = Boolean(process.env.AGENT_MEMORY_SKILLS_HOME);
+  return (!overridden && process.env.CODEX_HOME) || join(home, '.codex');
+}
+
 /** Every VS Code-family user directory that exists on this machine. */
 export function vscodeUserDirs(home = agentHome()) {
   return VSCODE_FLAVOURS.map(([id, label, dir]) => ({
@@ -81,6 +93,14 @@ export function detectTargets(home = agentHome()) {
       kind: 'skill-dir',
       dir: join(home, '.claude', 'skills'),
       detected: existsSync(join(home, '.claude')),
+    },
+    {
+      id: 'codex',
+      label: 'Codex CLI',
+      kind: 'skill-dir',
+      dir: join(codexHome(home), 'skills'),
+      detected: existsSync(codexHome(home)),
+      note: 'same SKILL.md layout as Claude Code',
     },
   ];
 

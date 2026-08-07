@@ -22,7 +22,7 @@ const { compact, writeSkillDescription } = await import('../src/compact.js');
 const stale = await import('../src/staleness.js');
 const { setup, unlinkSkills, danglingSkillLinks, skillTargets, packagedSkillsDir, SKILLS } =
   await import('../src/setup.js');
-const { vscodeUserDir } = await import('../src/targets.js');
+const { vscodeUserDir, codexHome } = await import('../src/targets.js');
 const { isGenerated } = await import('../src/promptfile.js');
 const { atomicWrite, tempName } = await import('../src/atomic.js');
 const { paths, DEFAULTS, loadConfig, saveConfig } = await import('../src/config.js');
@@ -457,9 +457,10 @@ test('two ids describing the same thing warn, and the write still lands', async 
 // --- skill installation ---------------------------------------------------------
 
 /** A home with the given agents "installed", so detection has something to find. */
-function fakeHome({ claude = false, vscode = false } = {}) {
+function fakeHome({ claude = false, codex = false, vscode = false } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
   if (claude) mkdirSync(join(home, '.claude'), { recursive: true });
+  if (codex) mkdirSync(join(home, '.codex'), { recursive: true });
   // Set the override before deriving the path: on Windows that is what stops the
   // VS Code location resolving to the real %APPDATA%.
   if (vscode) {
@@ -484,10 +485,10 @@ test('setup installs only where a tool is actually present', () => {
     rmSync(bare, { recursive: true, force: true });
   }
 
-  const both = fakeHome({ claude: true });
+  const both = fakeHome({ claude: true, codex: true });
   try {
     const r = setup({});
-    assert.deepEqual(r.targets.map((t) => t.id).sort(), ['agents', 'claude-code']);
+    assert.deepEqual(r.targets.map((t) => t.id).sort(), ['agents', 'claude-code', 'codex']);
     for (const dir of skillTargets()) {
       for (const name of SKILLS) {
         assert.ok(existsSync(join(dir, name, 'SKILL.md')), `${name} missing from ${dir}`);
@@ -496,6 +497,25 @@ test('setup installs only where a tool is actually present', () => {
   } finally {
     delete process.env.AGENT_MEMORY_SKILLS_HOME;
     rmSync(both, { recursive: true, force: true });
+  }
+});
+
+test('CODEX_HOME is honoured, but never over an overridden home', () => {
+  const home = '/nowhere/home';
+  const previous = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = '/custom/codex';
+  try {
+    // A real run follows CODEX_HOME, because that is where Codex actually keeps skills.
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    assert.equal(codexHome(home), '/custom/codex');
+
+    // A test run must not: honouring it here would write into the real installation.
+    process.env.AGENT_MEMORY_SKILLS_HOME = home;
+    assert.equal(codexHome(home), join(home, '.codex'));
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    if (previous === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previous;
   }
 });
 
