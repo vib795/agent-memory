@@ -92,34 +92,34 @@ Every command takes `--json`. Every cap lives in `config.json` and is tunable.
 
 ## Install
 
-Installing the package installs everything — the CLI, all three skills, and the
-store. There is no second step.
+Two commands, and the second one is not optional:
 
 ```bash
 npm install -g https://github.com/vib795/copilot-memory-everywhere.git
+agent-memory setup
 ```
 
-The `postinstall` hook links `handoff`, `recall` and `remember` into both agent
-directories (`~/.agents/skills` and `~/.claude/skills`, or `%USERPROFILE%\...` on
-Windows), creates the store, and generates the routing digest. Restart VS Code and
-`/recall`, `/remember` and `/handoff` are all live.
+`setup` links `handoff`, `recall` and `remember` into both agent directories
+(`~/.agents/skills` and `~/.claude/skills`, or `%USERPROFILE%\...` on Windows),
+creates the store, and generates the routing digest.
+
+**Why it is not automatic.** There is a `postinstall` hook that does exactly this,
+but current npm refuses to run package install scripts unless you opt in per
+package, and prints only a warning when it skips them. Managed environments go
+further and set `ignore-scripts=true` globally. Rather than pretend, the second
+command is documented as part of the install. If you would rather have it automatic:
+
+```bash
+npm install -g --allow-scripts=agent-memory <url>
+```
+
+Either way `agent-memory doctor` tells you where you stand; it reports
+`skills linked: none registered` when setup has not run.
 
 Windows uses directory junctions, which need neither admin rights nor Developer
 Mode. On a network-backed profile (FSLogix, roaming) junctions fail and the skills
 are copied instead — setup says which one you got, and copies need
 `agent-memory setup` re-run after each upgrade.
-
-### If nothing appears to happen
-
-Managed npm configurations often set `ignore-scripts=true`, which skips
-`postinstall` with no warning at all. One command fixes it:
-
-```bash
-agent-memory setup
-```
-
-`agent-memory doctor` reports `skills linked: none registered` when this is the
-situation, so it is visible rather than mysterious.
 
 ### From a clone
 

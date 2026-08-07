@@ -11,7 +11,9 @@ import { ensureStore, listNotes, contentHash, nowIso, touchNoteAccessed } from '
  * it safe to throw the database away when anything looks wrong.
  */
 
-const SCHEMA_VERSION = 1;
+// 2: nodes_fts gained the porter stemmer. Bumping rebuilds the index on next open,
+// which costs nothing to get wrong because it is derived entirely from the markdown.
+const SCHEMA_VERSION = 2;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS nodes (
@@ -48,8 +50,12 @@ CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst);
 CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type) WHERE archived = 0;
 CREATE INDEX IF NOT EXISTS idx_node_repos_repo ON node_repos(repo);
 
+-- The porter stemmer is what lets a question find a note. Without it "secrets"
+-- misses "secret" and "written" misses "write", which is precisely the mismatch
+-- natural questions produce, and asking questions is the entire use case.
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts
-  USING fts5(title, body, content='nodes', content_rowid='rowid');
+  USING fts5(title, body, content='nodes', content_rowid='rowid',
+             tokenize='porter unicode61');
 `;
 
 const DROP = `
@@ -234,19 +240,28 @@ export function searchNodes(db, terms, { limit = 10, includeArchived = false } =
   const arch = includeArchived ? 1 : 0;
 
   if (ftsAvailable) {
+    const stmt = db.prepare(`
+      SELECT n.*, bm25(nodes_fts) AS rank
+        FROM nodes_fts
+        JOIN nodes n ON n.rowid = nodes_fts.rowid
+       WHERE nodes_fts MATCH ?
+         AND (? = 1 OR n.archived = 0)
+       ORDER BY rank, n.id
+       LIMIT ?
+    `);
     try {
-      return db
-        .prepare(`
-          SELECT n.*, bm25(nodes_fts) AS rank
-            FROM nodes_fts
-            JOIN nodes n ON n.rowid = nodes_fts.rowid
-           WHERE nodes_fts MATCH ?
-             AND (? = 1 OR n.archived = 0)
-           ORDER BY rank, n.id
-           LIMIT ?
-        `)
-        .all(ftsQuery(q), arch, limit)
-        .map((r) => hydrate(db, r));
+      // Every term first, which is precise when the caller knows the vocabulary.
+      // Then any term, because people ask questions rather than name keywords, and
+      // "why did we avoid a native build step" shares only three words with the note
+      // that answers it. Requiring all of them means a question never matches.
+      // bm25 does the discriminating: rare words outrank "why" and "we" on their own.
+      for (const mode of ['all', 'any']) {
+        const expr = ftsQuery(q, mode);
+        if (!expr) break;
+        const rows = stmt.all(expr, arch, limit);
+        if (rows.length) return rows.map((r) => hydrate(db, r));
+      }
+      return [];
     } catch {
       // Fall through to LIKE rather than surfacing an FTS5 error to the caller.
     }
@@ -265,11 +280,17 @@ export function searchNodes(db, terms, { limit = 10, includeArchived = false } =
     .map((r) => hydrate(db, r));
 }
 
-/** Quote each term so user punctuation cannot be read as an FTS5 operator. */
-function ftsQuery(q) {
+/**
+ * Quote each term so user punctuation cannot be read as an FTS5 operator.
+ *
+ * 'all' joins with a space, which FTS5 reads as AND. 'any' joins with OR.
+ * Returns null when there is nothing to search for, so the caller can stop.
+ */
+function ftsQuery(q, mode = 'all') {
   const terms = q.match(/[\p{L}\p{N}_]+/gu) || [];
-  if (!terms.length) return '""';
-  return terms.map((t) => `"${t}"`).join(' ');
+  if (!terms.length) return null;
+  const quoted = terms.map((t) => `"${t}"`);
+  return mode === 'any' ? quoted.join(' OR ') : quoted.join(' ');
 }
 
 /**

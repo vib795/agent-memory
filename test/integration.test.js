@@ -15,6 +15,7 @@ process.on('exit', () => rmSync(ROOT, { recursive: true, force: true }));
 
 const { writeNote, listNotes, notePath, readNote } = await import('../src/store.js');
 const idx = await import('../src/index-db.js');
+const { searchNodes } = idx;
 const { neighborhood, applyBudget } = await import('../src/graph.js');
 const { buildTree, buildDigest, renderTree } = await import('../src/digest.js');
 const { compact, writeSkillDescription } = await import('../src/compact.js');
@@ -126,6 +127,46 @@ test('deleting the index and rebuilding reproduces identical output', () => {
   const db2 = idx.openDb();
   assert.equal(before, snapshot(db2));
   db2.close();
+});
+
+// --- search quality ------------------------------------------------------------
+
+test('a natural-language question finds the note that answers it', () => {
+  const db = seed();
+  // FTS5 reads a space as AND, so requiring every word means a real question never
+  // matches: this one shares three words with the note that answers it.
+  const hits = searchNodes(db, 'why did we not use JWT for sessions?');
+  assert.ok(hits.length, 'a question with stopwords still finds something');
+  // Both JWT notes are legitimate answers, so pinning an exact winner would be
+  // asserting a bm25 tie-break rather than anything about retrieval quality.
+  assert.ok(
+    ['auth-service', 'use-jwt'].includes(hits[0].id),
+    `top hit was ${hits[0].id}, expected one of the two notes about JWT`,
+  );
+  db.close();
+});
+
+test('search stems, so plurals and verb forms match', () => {
+  const db = seed();
+  writeNote({
+    id: 'token-rotation', type: 'convention', title: 'Rotating a signing token',
+    body: 'The token is rotated quarterly by the platform team.', repos: ['repo-a'],
+  });
+  idx.reindex(db);
+  for (const q of ['tokens', 'rotate', 'rotations']) {
+    assert.ok(
+      searchNodes(db, q).some((n) => n.id === 'token-rotation'),
+      `${JSON.stringify(q)} should reach a note saying "token" and "rotated"`,
+    );
+  }
+  db.close();
+});
+
+test('a genuine miss still reports a miss', () => {
+  const db = seed();
+  // The OR fallback must not turn every query into a match against everything.
+  assert.deepEqual(searchNodes(db, 'kubernetes helm chart rollout'), []);
+  db.close();
 });
 
 // --- retrieval budget ----------------------------------------------------------
