@@ -71,9 +71,18 @@ let ftsAvailable = true;
 export function openDb({ reindexOnCreate = true } = {}) {
   ensureStore();
   const db = new DatabaseSync(paths.db);
-  // WAL lets a reader in one VS Code window proceed while another window writes.
-  db.exec('PRAGMA journal_mode = WAL');
+  // busy_timeout must come first. Every pragma below can contend with another VS
+  // Code window, and until the timeout is set they fail instantly on SQLITE_BUSY
+  // rather than waiting. Two windows open at once is the normal working mode here.
   db.exec('PRAGMA busy_timeout = 5000');
+  try {
+    // WAL lets a reader in one window proceed while another window writes. It is a
+    // persistent property of the file, so losing this race is harmless: whichever
+    // process won already set it, and this connection inherits the result.
+    db.exec('PRAGMA journal_mode = WAL');
+  } catch {
+    /* already WAL, or another connection is mid-switch */
+  }
   db.exec('PRAGMA foreign_keys = ON');
 
   const version = db.prepare('PRAGMA user_version').get()?.user_version ?? 0;
