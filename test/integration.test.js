@@ -359,7 +359,10 @@ test('two concurrent writes both land, with no partial note left behind', async 
         process.execPath,
         [cli, 'write', '--from-json', file, '--json'],
         { env: { ...process.env, AGENT_MEMORY_HOME: ROOT } },
-        (err, stdout) => (err ? reject(err) : resolve(stdout)),
+        // Surface stdout and stderr on failure. A bare exec error says only that the
+        // process died, which is the least useful thing to learn about a race.
+        (err, stdout, stderr) =>
+          err ? reject(new Error(`${id} exited ${err.code}: ${stderr || stdout}`)) : resolve(stdout),
       );
     });
 
@@ -369,6 +372,32 @@ test('two concurrent writes both land, with no partial note left behind', async 
   assert.ok(ids.includes('concurrent-a'));
   assert.ok(ids.includes('concurrent-b'));
   assert.equal(notes.filter((n) => n.__error).length, 0, 'no half-written note');
+});
+
+test('two ids describing the same thing warn, and the write still lands', async () => {
+  seed().close();
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const write = (node) =>
+    new Promise((resolve, reject) => {
+      const file = join(ROOT, `${node.id}.json`);
+      writeFileSync(file, JSON.stringify(node), 'utf8');
+      execFile(
+        process.execPath,
+        [cli, 'write', '--from-json', file, '--json'],
+        { env: { ...process.env, AGENT_MEMORY_HOME: ROOT } },
+        (err, stdout) => (err ? reject(err) : resolve(JSON.parse(stdout))),
+      );
+    });
+
+  await write({ id: 'collide-a', type: 'system', title: 'Auth uses server sessions', body: 'first', repos: ['repo-a'] });
+  // Content-hash dedup cannot catch two agents describing one thing in different
+  // words. Normalized-title equality is what surfaces it.
+  const second = await write({
+    id: 'collide-b', type: 'system', title: 'auth uses server sessions!', body: 'second', repos: ['repo-a'],
+  });
+
+  assert.ok(second.warnings.some((w) => /title collision/.test(w) && /collide-a/.test(w)), JSON.stringify(second.warnings));
+  assert.ok(readNote('system', 'collide-b'), 'the warning does not block the write');
 });
 
 // --- documentation consistency --------------------------------------------------
