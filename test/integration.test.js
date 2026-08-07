@@ -6,7 +6,7 @@ import {
 } from 'node:fs';
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = mkdtempSync(join(tmpdir(), 'agent-memory-int-'));
@@ -369,7 +369,8 @@ test('commit counts, thresholds, and a rewritten history', () => {
   }
 
   stale.resetCache();
-  const name = repo.split('/').pop();
+  // basename, not split('/'): mkdtemp hands back backslash paths on Windows.
+  const name = basename(repo);
   assert.equal(stale.currentRepo(repo), name);
   assert.deepEqual(stale.commitsSince(first, repo), { status: 'ok', count: 12 });
   assert.equal(stale.commitsSince('deadbeefdeadbeef', repo).status, 'unreachable');

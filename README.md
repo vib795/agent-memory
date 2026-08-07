@@ -1,5 +1,10 @@
 # copilot-memory-everywhere
 
+[![test](https://github.com/vib795/copilot-memory-everywhere/actions/workflows/test.yml/badge.svg)](https://github.com/vib795/copilot-memory-everywhere/actions/workflows/test.yml)
+[![node](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)](https://nodejs.org)
+[![dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](package.json)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Give **GitHub Copilot** and **Claude Code** a memory that outlives the window, the
 repository, and the week — using nothing an IT security review would need to approve.
 
@@ -95,6 +100,13 @@ Every command takes `--json`. Every cap lives in `config.json` and is tunable.
 Two commands, and the second one is not optional:
 
 ```bash
+npm install -g @vib795/agent-memory
+agent-memory setup
+```
+
+Straight from git works too, and needs no registry access:
+
+```bash
 npm install -g https://github.com/vib795/copilot-memory-everywhere.git
 agent-memory setup
 ```
@@ -110,7 +122,7 @@ further and set `ignore-scripts=true` globally. Rather than pretend, the second
 command is documented as part of the install. If you would rather have it automatic:
 
 ```bash
-npm install -g --allow-scripts=agent-memory <url>
+npm install -g --allow-scripts=@vib795/agent-memory @vib795/agent-memory
 ```
 
 Either way `agent-memory doctor` tells you where you stand; it reports
@@ -238,7 +250,7 @@ Order matters, and npm will not do it for you:
 
 ```bash
 agent-memory uninstall      # first — removes the six skill links
-npm uninstall -g agent-memory
+npm uninstall -g @vib795/agent-memory
 ```
 
 npm 7 dropped support for uninstall lifecycle hooks, so `npm uninstall -g` on its

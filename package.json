@@ -1,7 +1,23 @@
 {
-  "name": "agent-memory",
+  "name": "@vib795/agent-memory",
   "version": "0.1.0",
   "description": "Durable cross-repo knowledge graph for GitHub Copilot and Claude Code. Markdown source of truth, disposable SQLite index, zero runtime dependencies.",
+  "keywords": [
+    "github-copilot",
+    "claude-code",
+    "agent-skills",
+    "memory",
+    "knowledge-graph",
+    "sqlite",
+    "zero-dependencies"
+  ],
+  "homepage": "https://github.com/vib795/copilot-memory-everywhere#readme",
+  "bugs": "https://github.com/vib795/copilot-memory-everywhere/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vib795/copilot-memory-everywhere.git"
+  },
+  "author": "Utkarsh Singh (https://github.com/vib795)",
   "type": "module",
   "bin": { "agent-memory": "src/cli.js" },
   "engines": { "node": ">=22.5.0" },
@@ -10,7 +26,7 @@
     "postinstall": "node scripts/postinstall.js",
     "setup": "node src/cli.js setup"
   },
-  "files": ["src/", "scripts/", "skills/", "install.sh", "install.ps1", "README.md"],
+  "files": ["src/", "scripts/", "skills/", "install.sh", "install.ps1", "README.md", "LICENSE"],
   "license": "MIT",
-  "private": true
+  "publishConfig": { "access": "public" }
 }

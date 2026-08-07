@@ -1,0 +1,128 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # Windows is the point of this matrix, not an afterthought. The target machine is
+    # a Windows desktop, junctions and USERPROFILE only exist there, and every path
+    # bug this project has had would have been caught here first.
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['22', '24']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # node:sqlite ships in Node core from 22.5. Assert it rather than discover it
+      # through a confusing failure three steps later.
+      - name: Verify node:sqlite is present
+        run: node -e "const s=require('node:sqlite'); if(!s.DatabaseSync) throw new Error('no DatabaseSync'); console.log('node',process.versions.node,'sqlite ok')"
+
+      # The staleness tests build a throwaway repository and count commits in it.
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+
+      - name: Test
+        run: npm test
+
+  install:
+    name: install from tarball / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # A tarball install is a true copy, which is what a registry or git-URL install
+      # actually does. Installing the directory would symlink and prove less.
+      - name: Pack and install globally
+        shell: bash
+        run: |
+          set -euo pipefail
+          tgz=$(npm pack --pack-destination "$RUNNER_TEMP" | tail -1)
+          npm install -g --allow-scripts=@vib795/agent-memory "$RUNNER_TEMP/$tgz"
+
+      - name: Setup links all three skills
+        shell: bash
+        env:
+          AGENT_MEMORY_HOME: ${{ runner.temp }}/store
+          AGENT_MEMORY_SKILLS_HOME: ${{ runner.temp }}/skills
+        run: |
+          set -euo pipefail
+          agent-memory setup
+          for s in handoff recall remember; do
+            for d in .agents .claude; do
+              test -f "$AGENT_MEMORY_SKILLS_HOME/$d/skills/$s/SKILL.md" \
+                || { echo "missing $d/skills/$s"; exit 1; }
+            done
+          done
+          agent-memory doctor
+
+      - name: Write, retrieve, and rebuild the index
+        shell: bash
+        env:
+          AGENT_MEMORY_HOME: ${{ runner.temp }}/store
+          AGENT_MEMORY_SKILLS_HOME: ${{ runner.temp }}/skills
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/nodes.json" <<'JSON'
+          {"nodes":[
+            {"id":"ci-smoke","type":"system","title":"CI smoke note",
+             "body":"Written by CI to prove the round trip. Token ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa must not survive.",
+             "edges":[{"rel":"depends-on","dst":"ci-constraint"}]},
+            {"id":"ci-constraint","type":"constraint","title":"CI constraint note",
+             "body":"Constraints are never dropped from a truncated tree."}
+          ]}
+          JSON
+          agent-memory write --from-json "$RUNNER_TEMP/nodes.json"
+          agent-memory tree
+          agent-memory get ci-smoke --depth 1
+          agent-memory search "round trip"
+
+          # Redaction must have fired before anything reached disk.
+          if grep -rq "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$AGENT_MEMORY_HOME"; then
+            echo "raw token found on disk"; exit 1
+          fi
+
+          # The index is a cache: deleting it must change nothing.
+          before=$(agent-memory get ci-smoke --depth 1 --json)
+          rm -f "$AGENT_MEMORY_HOME/index.db" "$AGENT_MEMORY_HOME"/index.db-*
+          agent-memory index
+          test "$before" = "$(agent-memory get ci-smoke --depth 1 --json)" \
+            || { echo "output changed after rebuild"; exit 1; }
+
+      - name: Uninstall leaves no dangling links and keeps notes
+        shell: bash
+        env:
+          AGENT_MEMORY_HOME: ${{ runner.temp }}/store
+          AGENT_MEMORY_SKILLS_HOME: ${{ runner.temp }}/skills
+        run: |
+          set -euo pipefail
+          agent-memory uninstall
+          for s in handoff recall remember; do
+            test ! -e "$AGENT_MEMORY_SKILLS_HOME/.agents/skills/$s" \
+              || { echo "$s survived uninstall"; exit 1; }
+          done
+          test -f "$AGENT_MEMORY_HOME/notes/system/ci-smoke.md" \
+            || { echo "uninstall destroyed a note"; exit 1; }
