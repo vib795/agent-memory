@@ -241,7 +241,71 @@ rows share an id.
 
 ---
 
-## Step 7 — Print the pickup line
+## Step 7 — Capture durable knowledge
+
+Skip this step entirely if `agent-memory` is not installed. It is optional
+machinery; the handoff above is complete without it.
+
+A handoff carries this thread. The graph carries what stays true after the thread
+ends. You already hold the whole conversation, so writing both costs the same single
+request, which is the only reason this step belongs here rather than in its own skill.
+
+### What is durable
+
+<!-- extraction-rules:start -->
+- A node is durable only if it will still be true next month. Task state is not
+  durable and belongs in a handoff file, not in the graph.
+- Every `decision` node carries its why and its rejected alternatives, or it is not
+  written. Rationale is the thing that never survives re-explanation.
+- Anything the conversation did not actually establish is `confidence: inferred`,
+  and the body says what would confirm it.
+- Prefer updating an existing node over creating a near-duplicate. `write` returns
+  the existing id on a content-hash match.
+- A decision that replaces a known prior sets `supersedes` to that prior's id.
+- Constraints are the highest-value type. An environment restriction, a blocked
+  tool, a policy that forbids an approach: write it, because it is what stops a
+  future agent burning a retry loop on something that was never going to ship.
+- Zero durable knowledge is a valid outcome. Writing nothing beats writing noise.
+<!-- extraction-rules:end -->
+
+Your Decisions table and Constraints section are usually already the durable part.
+The Current task state section never is.
+
+### Write it (ONE terminal call)
+
+Types are `system`, `decision`, `convention`, `constraint`. Edge relations are
+`depends-on`, `applies-to`, `supersedes`, `contradicts`, `evidence-for`.
+
+```bash
+tmp="$(mktemp)"
+cat > "$tmp" <<'JSON'
+{"nodes":[
+  {"id":"use-sessions","type":"decision",
+   "title":"Chose server sessions over JWT",
+   "body":"Why: revocation had to take effect immediately.\nRejected: short-TTL JWT, because logout would lag by the TTL.\nImplemented in src/auth/session.js:42.",
+   "edges":[{"rel":"evidence-for","dst":"auth-service"}]}
+]}
+JSON
+agent-memory write --from-json "$tmp" --source handoff
+rm -f "$tmp"
+```
+
+```powershell
+$tmp = [System.IO.Path]::GetTempFileName()
+@'
+<the JSON>
+'@ | Set-Content -Path $tmp -Encoding UTF8
+agent-memory write --from-json $tmp --source handoff
+Remove-Item -Force $tmp
+```
+
+`write` redacts before anything reaches disk and reports every validation error at
+once. Surface its warnings verbatim; a `title collision` warning means two ids now
+describe the same thing and the user should know.
+
+---
+
+## Step 8 — Print the pickup line
 
 End your reply with exactly this, and nothing after it:
 

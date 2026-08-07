@@ -42,11 +42,20 @@ function rewrite(node) {
  * Merge notes whose content is identical.
  *
  * The keeper is the earliest `created`, because the first capture is the one other
- * notes are most likely to already point at. Repos and edges are unioned so nothing
- * a duplicate knew is lost, and inbound edges are repointed at the keeper so the
- * merge does not leave a dangling reference behind.
+ * notes are most likely to already point at. Timestamps are second-precision, so two
+ * notes captured in the same turn tie routinely; the tie goes to whichever node more
+ * things already reference, which is the same rationale stated directly rather than
+ * approximated by a timestamp. Id is the last resort, purely for determinism.
+ *
+ * Repos and edges are unioned so nothing a duplicate knew is lost, and inbound edges
+ * are repointed at the keeper so the merge leaves no dangling reference behind.
  */
 function dedupe(active) {
+  const inbound = new Map();
+  for (const n of active) {
+    for (const e of n.edges || []) inbound.set(e.dst, (inbound.get(e.dst) || 0) + 1);
+  }
+
   const groups = new Map();
   for (const n of active) {
     const h = contentHash(n);
@@ -58,14 +67,11 @@ function dedupe(active) {
   const remap = new Map();
   for (const group of groups.values()) {
     if (group.length < 2) continue;
-    group.sort((a, b) =>
-      (a.created || '') < (b.created || '')
-        ? -1
-        : (a.created || '') > (b.created || '')
-          ? 1
-          : a.id < b.id
-            ? -1
-            : 1,
+    group.sort(
+      (a, b) =>
+        (a.created || '').localeCompare(b.created || '') ||
+        (inbound.get(b.id) || 0) - (inbound.get(a.id) || 0) ||
+        a.id.localeCompare(b.id),
     );
     const [keeper, ...dups] = group;
     keeper.repos = [

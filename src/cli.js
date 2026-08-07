@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { loadConfig, paths, NOTE_TYPES } from './config.js';
+import { loadConfig, saveConfig, paths, NOTE_TYPES } from './config.js';
 import { ensureStore, writeNote, normalizeTitle, listNotes } from './store.js';
 import {
   openDb, reindex, searchNodes, getNodeRow, markAccessed, nodeCount, hasFts,
@@ -66,7 +66,7 @@ function git(args, cwd = process.cwd()) {
 
 const USAGE = `agent-memory — durable cross-repo knowledge for coding agents
 
-  init                                   create the store and an empty index
+  init [--skills "<p1>,<p2>"]            create the store; register skill files
   index                                  rebuild index.db from notes/
   tree [--repo <name>] [--all]           routing map, scoped to a repo
   get <id> [--depth N] [--budget N]      a note plus its neighborhood
@@ -82,8 +82,19 @@ Store: ${paths.root}`;
 
 // --- commands ---------------------------------------------------------------
 
-function cmdInit() {
+function cmdInit(opts) {
   ensureStore();
+
+  // Registered before the compact below, so the very first run already writes the
+  // digest into each skill description rather than leaving it as a placeholder.
+  let registered = [];
+  if (typeof opts.skills === 'string') {
+    const existing = loadConfig().skillPaths || [];
+    const incoming = opts.skills.split(',').map((s) => s.trim()).filter(Boolean);
+    registered = [...new Set([...existing, ...incoming])];
+    saveConfig({ skillPaths: registered });
+  }
+
   const db = openDb();
   const result = compact({ db });
   db.close();
@@ -91,8 +102,13 @@ function cmdInit() {
     ok: true,
     store: paths.root,
     notes: result.indexed,
+    skills: registered,
     digest: result.digest,
-    text: `Store ready at ${paths.root}\n${result.indexed} notes indexed.`,
+    text: [
+      `Store ready at ${paths.root}`,
+      `${result.indexed} notes indexed.`,
+      ...registered.map((s) => `registered skill ${s}`),
+    ].join('\n'),
   };
 }
 
