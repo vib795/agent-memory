@@ -115,6 +115,22 @@ npm install -g https://github.com/vib795/agent-memory.git
 agent-memory setup
 ```
 
+Every release is mirrored to **GitHub Packages**. Treat that as redundancy rather
+than a second front door: GitHub Packages requires authentication even for public
+packages, so installing from it costs you a token that npmjs does not ask for.
+
+```bash
+npm config set @vib795:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken <a PAT with read:packages>
+npm install -g @vib795/agent-memory
+agent-memory setup
+```
+
+Prefer npmjs unless you have a specific reason not to. Releases there are published
+by CI from a tag and carry a [provenance attestation](https://docs.npmjs.com/generating-provenance-statements),
+so `npm audit signatures` will tell you the tarball you installed was built from the
+commit it claims. Neither the git nor the GitHub Packages path gives you that.
+
 `setup` probes for every agent on the machine and installs into each one it finds,
 in whatever format that tool reads. It then creates the store and generates the
 routing digest.
