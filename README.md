@@ -1,6 +1,9 @@
 # agent-memory
 
+[![npm](https://img.shields.io/npm/v/@vib795/agent-memory)](https://www.npmjs.com/package/@vib795/agent-memory)
 [![test](https://github.com/vib795/agent-memory/actions/workflows/test.yml/badge.svg)](https://github.com/vib795/agent-memory/actions/workflows/test.yml)
+[![release](https://github.com/vib795/agent-memory/actions/workflows/release.yml/badge.svg)](https://github.com/vib795/agent-memory/actions/workflows/release.yml)
+[![provenance](https://img.shields.io/badge/provenance-attested-brightgreen)](https://www.npmjs.com/package/@vib795/agent-memory)
 [![node](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)](https://nodejs.org)
 [![dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](package.json)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
