@@ -1,0 +1,78 @@
+name: release
+
+# Publishing is driven by the tag, not by a person at a keyboard. That is the point:
+# the artifact on npm is reproducible from a commit anyone can check out, and nobody
+# has to spend a 2FA recovery code to ship a patch.
+on:
+  push:
+    tags: ['v*']
+
+# Read-only by default; the publish job widens this for itself and nothing else.
+permissions:
+  contents: read
+
+jobs:
+  # The same matrix that gates main, gated on again here. A tag can point at any
+  # commit, including one that never sat on main, so this is not redundant with CI.
+  test:
+    uses: ./.github/workflows/test.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # cut the GitHub Release
+      id-token: write   # sign the npm provenance attestation
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      # A tag that disagrees with package.json means someone tagged the wrong commit
+      # or skipped the version bump. Either way the wrong bytes are about to become
+      # permanent, and npm does not give a version number back once it is taken.
+      - name: Tag must match package.json
+        run: |
+          set -euo pipefail
+          pkg=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "package.json: $pkg"
+          echo "tag:          $tag"
+          test "$pkg" = "$tag" || {
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json $pkg"
+            exit 1
+          }
+
+      # npm refuses a republish, but only after the upload. Checking first turns a
+      # confusing 403 at the end of a five-minute matrix into a one-line explanation.
+      - name: Version must not already be published
+        run: |
+          set -euo pipefail
+          name=$(node -p "require('./package.json').name")
+          ver=$(node -p "require('./package.json').version")
+          if npm view "$name@$ver" version >/dev/null 2>&1; then
+            echo "::error::$name@$ver is already on the registry"
+            exit 1
+          fi
+          echo "$name@$ver is unpublished; proceeding"
+
+      # --provenance ties the tarball to this workflow run and this commit, and npm
+      # renders the badge on the package page. It needs `id-token: write` above and a
+      # public repository, both of which hold here.
+      - name: Publish
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Cut the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
