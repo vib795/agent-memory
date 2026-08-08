@@ -40,6 +40,16 @@ jobs:
           git config --global user.email "ci@example.com"
           git config --global user.name "CI"
 
+      # Zero runtime dependencies is the claim the README leads with, and the reason
+      # this passes review on a locked-down desktop. A claim nothing enforces is one
+      # that quietly stops being true the first time someone runs --save.
+      - name: Assert zero runtime dependencies
+        shell: bash
+        run: |
+          n=$(node -p "Object.keys(require('./package.json').dependencies||{}).length")
+          test "$n" -eq 0 || { echo "::error::$n runtime dependencies; this package must have none"; exit 1; }
+          npm audit --audit-level=low
+
       - name: Test
         run: npm test
 

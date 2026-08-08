@@ -62,10 +62,23 @@ jobs:
       # --provenance ties the tarball to this workflow run and this commit, and npm
       # renders the badge on the package page. It needs `id-token: write` above and a
       # public repository, both of which hold here.
+      # The failure mode this catches cost a release once. npm reports EOTP, which
+      # reads as "your code was wrong" but actually means the token was never allowed
+      # to publish without one. Translating it here saves the next person the hour.
       - name: Publish
-        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set +e
+          npm publish --provenance --access public 2>&1 | tee "$RUNNER_TEMP/publish.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -ne 0 ]; then
+            if grep -q 'EOTP' "$RUNNER_TEMP/publish.log"; then
+              echo "::error::NPM_TOKEN cannot publish without a one-time password. Regenerate the granular token with 'Allow this token to bypass 2FA' checked, update the secret, then re-run this job."
+            fi
+            exit "$code"
+          fi
 
       - name: Cut the GitHub Release
         env:
