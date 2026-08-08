@@ -76,3 +76,31 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
             --verify-tag
+
+  # A mirror, not a second front door. GitHub Packages requires a PAT to install
+  # even when the package is public, so npmjs stays the address we publish. This
+  # exists so the artifact survives one registry having a bad day, and so the repo
+  # page shows what it ships.
+  #
+  # Runs only after npmjs succeeds: npmjs is the source of truth, and a mirror that
+  # can run ahead of the original is not a mirror.
+  publish-github:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://npm.pkg.github.com'
+
+      # No --provenance here. Attestation is an npmjs feature; GitHub Packages
+      # rejects the flag rather than ignoring it.
+      - name: Publish to GitHub Packages
+        run: npm publish --registry=https://npm.pkg.github.com
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
