@@ -98,24 +98,31 @@ Fields you may set: `id`, `type`, `title`, `body`, `repos`, `scope`, `confidence
 **bash (macOS / Linux):**
 
 ```bash
-tmp="$(mktemp)"
-cat > "$tmp" <<'JSON'
+agent-memory write --from-json - --source remember <<'JSON'
 <the JSON from Step 2>
 JSON
-agent-memory write --from-json "$tmp" --source remember
-rm -f "$tmp"
 ```
 
 **PowerShell (Windows / AVD):**
 
 ```powershell
-$tmp = [System.IO.Path]::GetTempFileName()
 @'
 <the JSON from Step 2>
-'@ | Set-Content -Path $tmp -Encoding UTF8
-agent-memory write --from-json $tmp --source remember
-Remove-Item -Force $tmp
+'@ | Set-Content -Path .agent-memory-write.json -Encoding UTF8
+agent-memory write --from-json .agent-memory-write.json --source remember
+Remove-Item -Force .agent-memory-write.json
 ```
+
+**Use these as written. Do not introduce a variable.** Some agent terminals rewrite
+`$`-prefixed lines before the shell sees them, which turns the payload into malformed
+JSON and costs you two retries diagnosing a corruption that never reached disk. Both
+recipes above are free of variables for that reason.
+
+PowerShell writes a file rather than piping, because Windows PowerShell pipes to a
+native command using `$OutputEncoding`, which is not UTF-8 by default and would mangle
+any non-ASCII character in a body. `-Encoding UTF8` on a file is explicit and safe. The
+file is written next to you and removed on the next line; if you see it left behind,
+the write failed and the JSON is still there to read.
 
 Redaction runs inside `write`, before any bytes reach disk, and cannot be turned
 off. You still must not paste a raw secret into the JSON: the guard is a backstop,
