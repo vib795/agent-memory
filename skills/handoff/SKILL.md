@@ -2,11 +2,8 @@
 name: handoff
 version: 0.1.0
 description: Capture the working state of the current conversation into a portable handoff file, so an agent in a different VS Code window or a different repository can continue the work without the user re-explaining it. Use when the user says handoff, hand this off, save context, wrap this up, or continue this elsewhere.
-allowed-tools:
-  - Bash
-  - Read
-  - Write
-  - Glob
+license: MIT
+allowed-tools: Bash Read Write Glob
 triggers:
   - handoff
   - hand this off

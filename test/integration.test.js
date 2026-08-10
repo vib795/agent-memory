@@ -457,10 +457,11 @@ test('two ids describing the same thing warn, and the write still lands', async 
 // --- skill installation ---------------------------------------------------------
 
 /** A home with the given agents "installed", so detection has something to find. */
-function fakeHome({ claude = false, codex = false, vscode = false } = {}) {
+function fakeHome({ claude = false, codex = false, vscode = false, copilot = false } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
   if (claude) mkdirSync(join(home, '.claude'), { recursive: true });
   if (codex) mkdirSync(join(home, '.codex'), { recursive: true });
+  if (copilot) mkdirSync(join(home, '.copilot'), { recursive: true });
   // Set the override before deriving the path: on Windows that is what stops the
   // VS Code location resolving to the real %APPDATA%.
   if (vscode) {
@@ -497,6 +498,79 @@ test('setup installs only where a tool is actually present', () => {
   } finally {
     delete process.env.AGENT_MEMORY_SKILLS_HOME;
     rmSync(both, { recursive: true, force: true });
+  }
+});
+
+test('a Copilot CLI install gets skills in the directory its own docs name', () => {
+  seed().close();
+  // GitHub documents `~/.copilot/skills` and `~/.agents/skills` as the two personal
+  // skill directories. Both are written when the CLI is here, because a user who
+  // uninstalls one tool should not silently lose the skills the other still reads.
+  const home = fakeHome({ copilot: true });
+  try {
+    const r = setup({});
+    assert.deepEqual(r.targets.map((t) => t.id).sort(), ['agents', 'copilot-cli']);
+
+    const copilot = r.targets.find((t) => t.id === 'copilot-cli');
+    assert.equal(copilot.kind, 'skill-dir', 'must be installable, not reported as unsupported');
+    assert.equal(copilot.dir, join(home, '.copilot', 'skills'));
+
+    for (const name of SKILLS) {
+      assert.ok(
+        existsSync(join(home, '.copilot', 'skills', name, 'SKILL.md')),
+        `${name} missing from ~/.copilot/skills`,
+      );
+    }
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a bare home still reaches Copilot through the shared ~/.agents/skills path', () => {
+  seed().close();
+  // The regression this guards: making ~/.copilot/skills a target must not become the
+  // only way Copilot is served, or a machine that has never run the CLI gets nothing.
+  const home = fakeHome();
+  try {
+    setup({});
+    for (const name of SKILLS) {
+      assert.ok(existsSync(join(home, '.agents', 'skills', name, 'SKILL.md')), `${name} missing`);
+    }
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('doctor fails when an agent is detected but has no skills in it', () => {
+  // The regression this guards is the one that makes every other check worthless:
+  // npm gates postinstall behind allow-scripts and managed profiles set
+  // ignore-scripts=true, so the CLI lands on PATH with nothing installed anywhere.
+  // Detection still succeeds, so doctor must check the files rather than the tools.
+  const home = fakeHome({ copilot: true, claude: true });
+  const store = mkdtempSync(join(tmpdir(), 'agent-memory-store-'));
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const run = () =>
+    spawnSync(process.execPath, [cli, 'doctor'], {
+      env: { ...process.env, AGENT_MEMORY_HOME: store, AGENT_MEMORY_SKILLS_HOME: home },
+      encoding: 'utf8',
+    });
+
+  try {
+    const before = run();
+    assert.match(before.stdout + before.stderr, /FAIL skills installed/, 'silent success is the bug');
+    assert.match(before.stdout + before.stderr, /GitHub Copilot CLI/, 'it names the agent that is empty');
+    assert.match(before.stdout + before.stderr, /agent-memory setup/, 'it names the fix');
+
+    setup({});
+
+    const after = run();
+    assert.match(after.stdout + after.stderr, /ok {3}skills installed/, 'passes once setup has run');
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+    rmSync(store, { recursive: true, force: true });
   }
 });
 
