@@ -465,11 +465,27 @@ that drifts as the work progresses does not create a duplicate.
 
 ## Status
 
-Capture is **explicit**. You invoke it, or `/handoff` does; nothing fires on its own.
+Capture is **judged, not scheduled.** You invoke it, `/handoff` does, or the agent
+does on its own when a juncture has just passed — a decision settled, a constraint
+found, a root cause identified, a convention agreed. It says so in one line and
+carries on with what you actually asked:
+
+```
+captured 2 notes [decision, constraint]
+```
+
+Nothing fires on a timer, on a tool count, or on every reply. That distinction is the
+whole design: a store full of task chatter is worse than an empty one, because it
+buries the four notes that mattered. The judgment of what is durable belongs to the
+model, in the turn where the context still exists; there is no keyword list deciding
+it. And because a request is charged per prompt rather than per tool call, capture
+that rides inside a turn you already paid for is free — which is why it can afford to
+happen at the moment the knowledge is fresh instead of whenever someone remembers.
 
 Not built yet, by choice:
 
-- Automatic or ambient capture
+- A capture-gap signal — the store knows when a note has gone stale, but not yet when
+  a repo has moved a hundred commits with nothing captured at all
 - Team sharing, multi-machine sync
 - An MCP server. It would read this same store, so it is an addition, not a rewrite.
 

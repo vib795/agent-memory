@@ -1,7 +1,7 @@
 ---
 name: remember
 version: 0.1.0
-description: Capture durable project knowledge from the current conversation into the shared memory graph, so a later conversation in any window or repository already knows it. Use when the user says remember this, save this, note this for later, or /remember.
+description: Capture durable project knowledge from this conversation into a cross-repo memory graph, so a later conversation anywhere already knows it. Use when the user says remember this, save this, note this for later, or /remember. Also invoke it unasked when a juncture passes - a decision settled, a constraint found, a root cause identified, a convention agreed - then say so in one line and carry on.
 license: MIT
 allowed-tools: Bash Read Write
 triggers:
@@ -25,11 +25,51 @@ call. Do not ask the user to confirm each node.
 
 ---
 
-## Two forms
+## Three forms
 
 - **`/remember`** — you select the durable knowledge from the conversation so far.
 - **`/remember <what>`** — the user named the thing. Write that, with full context
   from the conversation, and write nothing unrelated to it.
+- **Unasked** — you noticed a juncture pass and captured it without being told.
+
+### Capturing unasked
+
+A memory that only grows when someone remembers to grow it stays thin, and thin is
+how it dies: the one fact worth having is the one nobody stopped to write down.
+
+Invoke this yourself the moment one of these has just happened, in the same turn:
+
+- a **decision** was settled, and the reasons and rejected options are still in view
+- a **constraint** surfaced — a blocked tool, a policy, an environment restriction
+- a **root cause** was found, as opposed to a symptom worked around
+- a **convention** was agreed, or discovered by reading the code
+
+Do not capture on a timer, on a tool count, or at every reply. Those produce volume,
+and volume is what makes a graph useless — a store full of task chatter is worse than
+an empty one, because it buries the four notes that mattered.
+
+Never capture: task status, what you are about to do next, anything already in the
+graph, or anything that will be false next month. If you captured a juncture earlier
+in this conversation, do not capture it again because it came up a second time.
+
+**It is free, and that is the point.** A request is charged per prompt, not per tool
+call, so capturing inside a turn you were already answering costs nothing. Only a
+user typing `/remember` spends a request. That is the whole reason to do this
+yourself rather than wait to be asked.
+
+**Report it in one line, then carry on:**
+
+```
+captured 2 notes [decision, constraint]
+```
+
+At the end of the answer you were already giving. Do not print the JSON, do not
+summarize what you wrote, and do not make it the subject of the reply — the user
+asked you about something else and is still waiting for it. One line is enough for
+them to know it happened and to run `/recall` if they want the detail.
+
+If nothing durable happened, say nothing at all. Silence is the correct output for
+most turns.
 
 ---
 
