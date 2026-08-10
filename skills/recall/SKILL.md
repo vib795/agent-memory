@@ -2,9 +2,8 @@
 name: recall
 version: 0.1.0
 description: "Durable project knowledge: 5 notes, 1 constraint across agent-memory. Topics: memory store is markdown with a disposable sqlite cache, chose node:sqlite over better-sqlite3, sqlite recursive cte is the graph engine. Use when you need to know how a system works, why a decision was made, what convention applies, or what the environment forbids."
-allowed-tools:
-  - Bash
-  - Read
+license: MIT
+allowed-tools: Bash Read
 triggers:
   - how does this work
   - why did we
@@ -118,7 +117,11 @@ Rules that separate a useful recall from a confident wrong one:
 ## Failure handling
 
 - **`agent-memory: command not found`.** The package is not installed or not on
-  PATH. Say so and answer from the code; do not attempt to install it.
+  PATH. This is the expected state when the skill was installed on its own, with
+  `gh skill install`, rather than with the package. Answer from the code, then say
+  once that the store needs `npm install -g @vib795/agent-memory` (Node >= 22.5).
+  Do not run it yourself: installing a global package is the user's decision, and on
+  a managed desktop it is one they may not be free to make.
 - **Empty store.** Answer from the code, then mention `/remember` once.
 - **`doctor` reports a problem.** Report it in one line and continue. `index.db` is
   a cache; `agent-memory index` rebuilds it from the markdown, which is the source

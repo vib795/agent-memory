@@ -10,8 +10,9 @@ import { neighborhood, applyBudget } from './graph.js';
 import { buildTree, renderTree, buildDigest } from './digest.js';
 import { compact, maybeCompact } from './compact.js';
 import { staleness, currentRepo, reviewCandidates } from './staleness.js';
-import { setup as runSetup, unlinkSkills, danglingSkillLinks } from './setup.js';
-import { detectTargets } from './targets.js';
+import { setup as runSetup, unlinkSkills, danglingSkillLinks, SKILLS } from './setup.js';
+import { detectTargets, installableTargets } from './targets.js';
+import { join } from 'node:path';
 
 /**
  * One process, one answer.
@@ -471,6 +472,28 @@ function cmdDoctor() {
     'agents detected',
     agents.some((t) => t.kind !== 'unsupported'),
     agents.map((t) => `${t.label}${t.kind === 'unsupported' ? ' (skipped)' : ''}`).join('; '),
+  );
+
+  // Detection is not installation, and conflating them is how this tool reports
+  // healthy while doing nothing. npm gates postinstall scripts behind allow-scripts,
+  // and managed profiles set ignore-scripts=true; in both cases the CLI lands on PATH
+  // and every agent directory stays empty, while every other check here still passes.
+  // So verify the files, per agent, rather than trusting that setup ever ran.
+  const gaps = [];
+  for (const t of installableTargets()) {
+    const absent = SKILLS.filter((name) =>
+      t.kind === 'skill-dir'
+        ? !existsSync(join(t.dir, name, 'SKILL.md'))
+        : !existsSync(join(t.dir, `${name}.prompt.md`)),
+    );
+    if (absent.length) gaps.push(`${t.label}: ${absent.join(', ')}`);
+  }
+  add(
+    'skills installed',
+    gaps.length === 0,
+    gaps.length
+      ? `${gaps.join('; ')} — run \`agent-memory setup\``
+      : `${SKILLS.length} in each of ${installableTargets().length} agents`,
   );
 
   const dangling = danglingSkillLinks();

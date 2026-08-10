@@ -115,18 +115,19 @@ export function detectTargets(home = agentHome()) {
     });
   }
 
-  // Detected and deliberately not written to. Copilot CLI documents no user-global
-  // prompt or skill directory, and writing into its config folder on a guess is how
-  // you ship a file that does nothing while claiming support for it.
-  const copilotCli = join(home, '.copilot');
-  if (existsSync(copilotCli)) {
+  // GitHub documents two personal skill directories, `~/.copilot/skills` and
+  // `~/.agents/skills`, and Copilot reads both. The `agents` entry above therefore
+  // already covers Copilot on a machine that has never run the CLI; this entry exists
+  // so that a machine which has one keeps its skills where its own docs say to look.
+  const copilotHome = join(home, '.copilot');
+  if (existsSync(copilotHome)) {
     targets.push({
       id: 'copilot-cli',
-      label: 'Copilot CLI',
-      kind: 'unsupported',
-      dir: copilotCli,
+      label: 'GitHub Copilot CLI',
+      kind: 'skill-dir',
+      dir: join(copilotHome, 'skills'),
       detected: true,
-      note: 'no user-global prompt directory; use .github/copilot-instructions.md per repo',
+      note: 'personal agent skills, same SKILL.md layout',
     });
   }
 

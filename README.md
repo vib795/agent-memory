@@ -144,7 +144,11 @@ routing digest.
 | Claude Code, CLI and VS Code extension | linked skill directory | `~/.claude/skills/<name>/` |
 | Codex CLI | linked skill directory | `$CODEX_HOME/skills/<name>/` |
 | VS Code, Insiders, VSCodium, Cursor, Windsurf | prompt file | `<user data>/prompts/<name>.prompt.md` |
-| Copilot CLI | *detected, skipped* | it documents no user-global prompt directory; use `.github/copilot-instructions.md` per repo |
+| GitHub Copilot CLI | linked skill directory | `~/.copilot/skills/<name>/` |
+
+GitHub documents two personal skill directories, `~/.copilot/skills` and
+`~/.agents/skills`, and Copilot reads both. The shared one is always written, so
+Copilot is served even on a machine that has never run the CLI.
 
 Prompt files are what GitHub Copilot chat reads, and they appear as `/recall`,
 `/remember` and `/handoff` in the chat box. They are **generated from the same
@@ -164,8 +168,38 @@ command is documented as part of the install. If you would rather have it automa
 npm install -g --allow-scripts=@vib795/agent-memory @vib795/agent-memory
 ```
 
-Either way `agent-memory doctor` tells you where you stand; it reports
-`skills linked: none registered` when setup has not run.
+Either way `agent-memory doctor` tells you where you stand. It checks the files
+rather than the tools, and names any agent it found that has no skills in it:
+
+```
+FAIL skills installed: GitHub Copilot CLI: handoff, recall, remember — run `agent-memory setup`
+```
+
+Detecting an agent is not the same as having installed into it, and a check that
+conflated the two would report healthy on exactly the machine where nothing ran.
+
+### The skills on their own
+
+The three skills are also published as [agent skills](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills),
+so they can be installed without the package:
+
+```bash
+gh skill install vib795/agent-memory --scope user
+```
+
+That gives you `/handoff`, `/remember` and `/recall` in every agent that reads the
+shared skill directories, and nothing else — no CLI, so no store. The skills say so
+when you run them and name the one command that fixes it. Use this to try the
+prompts; use npm when you want the memory.
+
+Claude Code can take the same three as a plugin:
+
+```
+/plugin marketplace add vib795/agent-memory
+/plugin install agent-memory@agent-memory
+```
+
+The same caveat applies: the plugin carries the skills, `npm` carries the store.
 
 Windows uses directory junctions, which need neither admin rights nor Developer
 Mode. On a network-backed profile (FSLogix, roaming) junctions fail and the skills
