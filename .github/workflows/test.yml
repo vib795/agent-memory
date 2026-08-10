@@ -243,3 +243,73 @@ jobs:
           # doctor's `skills installed` check is fatal, so this fails the job if the
           # CLI landed on PATH while every agent directory stayed empty.
           agent-memory doctor
+
+      # install.ps1 has no test runner and cannot be parsed on the machine it was
+      # written on, so a syntax error in it would first be discovered by a user.
+      - name: Parse install.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$env:RUNNER_TEMP\agent-memory-clone\install.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) {
+            $errors | ForEach-Object { Write-Host "::error::$($_.Message)" }
+            exit 1
+          }
+          Write-Host "install.ps1 parses clean"
+
+      # install.ps1 is the documented Windows entry point and it broke on a real
+      # managed desktop: npm warns on stderr about an unknown config key, `2>&1` turns
+      # that warning into an ErrorRecord, and $ErrorActionPreference = 'Stop' makes it
+      # terminating — so the script aborted before doctor over a warning about an
+      # unrelated key. A clean runner cannot catch that, because npm there is silent.
+      # Seed the warning, then assert the script reaches its last line.
+      - name: install.ps1 survives an npm config warning
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          AGENT_MEMORY_HOME: ${{ runner.temp }}/ps1-store
+          AGENT_MEMORY_SKILLS_HOME: ${{ runner.temp }}/ps1-home
+        run: |
+          # Rejecting a removed config key with a warning is npm 11 behaviour. Node 22
+          # ships npm 10, which accepts `always-auth` in silence — so on a default
+          # runner there is no stderr, nothing to turn into an ErrorRecord, and this
+          # test reproduces nothing. Install the npm that actually warns, matching the
+          # desktop that reported the bug.
+          npm install -g npm@11 2>&1 | Out-Null
+          Write-Host "npm version: $(npm --version)"
+
+          # Ask npm where its user config lives rather than assuming ~/.npmrc; this
+          # runner uses a custom prefix, and a seed written to the wrong file is a test
+          # that proves nothing.
+          $userconfig = (& npm config get userconfig 2>&1 | Out-String).Trim()
+          Write-Host "npm userconfig: $userconfig"
+          Add-Content -Path $userconfig -Value "always-auth=true"
+
+          # Prove the seed before trusting it. install.ps1 sends npm through Out-Null,
+          # so a warning is invisible from the outside — if npm ever stops emitting one
+          # this test would keep passing while guarding nothing at all, which is worse
+          # than not having it. Assert the condition exists, then assert we survive it.
+          $probe = & npm ls -g --depth=0 2>&1 | Out-String
+          Write-Host "probe: $probe"
+          if ($probe -notmatch 'Unknown user config') {
+            Write-Host "::error::the npm warning this test depends on did not appear; it would pass vacuously"
+            exit 1
+          }
+
+          $out = & powershell -ExecutionPolicy Bypass `
+            -File "$env:RUNNER_TEMP\agent-memory-clone\install.ps1" 2>&1 | Out-String
+          Write-Host $out
+
+          # Reaching the closing line is the assertion: every earlier step is allowed
+          # to fail on a locked-down desktop, but the script must not abandon the user
+          # mid-run without printing doctor or telling them what to do next.
+          if ($out -notmatch 'Restart VS Code') {
+            Write-Host "::error::install.ps1 stopped before its closing message"
+            exit 1
+          }
+          if ($out -notmatch 'Installed for') {
+            Write-Host "::error::install.ps1 linked no skills"
+            exit 1
+          }
