@@ -37,8 +37,25 @@ if (-not $node) {
 
 Write-Host ""
 Write-Host "Linking the CLI" -ForegroundColor Cyan
-& npm install -g $source 2>&1 | Out-Null
-if ($LASTEXITCODE -eq 0) {
+# npm writes its warnings to stderr, and `2>&1` turns each one into an ErrorRecord,
+# which $ErrorActionPreference = 'Stop' then treats as terminating. A managed npm
+# config makes that certain rather than unlikely: an unknown key such as `always-auth`
+# produces a warning on every single npm invocation, so this step could never succeed
+# on the desktops this script exists for. It aborted the whole install — no fallback
+# message, no doctor, no closing instructions — over a warning about an unrelated
+# config key. Scope the preference to this one call.
+$previousPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    & npm install -g $source 2>&1 | Out-Null
+    $npmExit = $LASTEXITCODE
+} catch {
+    $npmExit = 1
+} finally {
+    $ErrorActionPreference = $previousPreference
+}
+
+if ($npmExit -eq 0) {
     Write-Host "  [npm] agent-memory installed globally" -ForegroundColor Green
 } else {
     # A global install failing on a managed desktop is common and not worth aborting
