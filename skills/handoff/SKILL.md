@@ -274,8 +274,7 @@ Types are `system`, `decision`, `convention`, `constraint`. Edge relations are
 `depends-on`, `applies-to`, `supersedes`, `contradicts`, `evidence-for`.
 
 ```bash
-tmp="$(mktemp)"
-cat > "$tmp" <<'JSON'
+agent-memory write --from-json - --source handoff <<'JSON'
 {"nodes":[
   {"id":"use-sessions","type":"decision",
    "title":"Chose server sessions over JWT",
@@ -283,18 +282,20 @@ cat > "$tmp" <<'JSON'
    "edges":[{"rel":"evidence-for","dst":"auth-service"}]}
 ]}
 JSON
-agent-memory write --from-json "$tmp" --source handoff
-rm -f "$tmp"
 ```
 
 ```powershell
-$tmp = [System.IO.Path]::GetTempFileName()
 @'
 <the JSON>
-'@ | Set-Content -Path $tmp -Encoding UTF8
-agent-memory write --from-json $tmp --source handoff
-Remove-Item -Force $tmp
+'@ | Set-Content -Path .agent-memory-write.json -Encoding UTF8
+agent-memory write --from-json .agent-memory-write.json --source handoff
+Remove-Item -Force .agent-memory-write.json
 ```
+
+**Use these as written. Do not introduce a variable.** Some agent terminals rewrite
+`$`-prefixed lines before the shell sees them, corrupting the payload into malformed
+JSON. PowerShell writes a file rather than piping because Windows PowerShell pipes to
+a native command using `$OutputEncoding`, which is not UTF-8 by default.
 
 `write` redacts before anything reaches disk and reports every validation error at
 once. Surface its warnings verbatim; a `title collision` warning means two ids now

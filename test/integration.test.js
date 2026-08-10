@@ -790,6 +790,43 @@ test('get on an archived node says so rather than returning nothing', () => {
   assert.match(withFlag.out, /Rejected JWT for sessions/, 'the body actually comes back');
 });
 
+test('write reads stdin with --from-json -, so the skills need no temp file', () => {
+  // Naming a temp file takes a shell variable, and an agent terminal that rewrites
+  // `$`-prefixed lines corrupts the payload into malformed JSON before the shell sees
+  // it. That happened on a real desktop and cost two retries, so the skills now pipe
+  // the document straight in and this is the path they depend on.
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const store = mkdtempSync(join(tmpdir(), 'agent-memory-stdin-'));
+  try {
+    const payload = JSON.stringify({
+      nodes: [{ id: 'piped-note', type: 'convention', title: 'Arrived over stdin',
+        body: 'Written without a temp file.', repos: ['repo-a'] }],
+    });
+    const res = spawnSync(process.execPath, [cli, 'write', '--from-json', '-', '--json'], {
+      env: { ...process.env, AGENT_MEMORY_HOME: store },
+      input: payload,
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 0, `stdin write failed: ${res.stdout}${res.stderr}`);
+    assert.match(res.stdout, /piped-note/);
+    assert.ok(
+      existsSync(join(store, 'notes', 'convention', 'piped-note.md')),
+      'the note reached disk',
+    );
+
+    // A missing file must still be refused, and the message must name the stdin form
+    // rather than leaving the caller to guess it exists.
+    const bad = spawnSync(process.execPath, [cli, 'write', '--from-json', 'nope.json'], {
+      env: { ...process.env, AGENT_MEMORY_HOME: store },
+      encoding: 'utf8',
+    });
+    assert.notEqual(bad.status, 0);
+    assert.match(bad.stdout + bad.stderr, /stdin/);
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+  }
+});
+
 // --- uninstall ---------------------------------------------------------------------
 
 test('uninstall removes our links and prompt files, spares foreign ones, keeps notes', () => {

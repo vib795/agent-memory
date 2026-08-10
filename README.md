@@ -96,6 +96,7 @@ agent-memory get <id> [--depth N]          a note plus its neighborhood
                      [--budget N] [--include-archived]
 agent-memory search <terms> [--limit N]    full-text fallback when the tree misses
 agent-memory write --from-json <file>      validated upsert; used by the skills
+                     --from-json -         read the JSON from stdin instead
 agent-memory compact                       dedup, decay, reindex, regenerate
 agent-memory doctor                        preflight and health report
 ```

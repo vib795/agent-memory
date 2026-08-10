@@ -298,7 +298,11 @@ function cmdSearch(opts) {
 }
 
 function readNodesFrom(file) {
-  const raw = JSON.parse(readFileSync(file, 'utf8'));
+  // `-` means stdin. Naming a temp file takes a shell variable, and some agent
+  // terminals rewrite `$`-prefixed lines before the shell ever sees them, which
+  // corrupts the payload into malformed JSON with nothing to point at. Reading the
+  // document straight off the pipe removes the variable, and with it the failure.
+  const raw = JSON.parse(readFileSync(file === '-' ? 0 : file, 'utf8'));
   if (Array.isArray(raw)) return raw;
   if (Array.isArray(raw?.nodes)) return raw.nodes;
   return [raw];
@@ -306,11 +310,11 @@ function readNodesFrom(file) {
 
 function cmdWrite(opts) {
   const file = opts['from-json'];
-  if (!file || file === true || !existsSync(file)) {
+  if (!file || file === true || (file !== '-' && !existsSync(file))) {
     return {
       ok: false,
-      error: 'write requires --from-json <file>',
-      text: 'write requires --from-json <file>',
+      error: 'write requires --from-json <file>, or - to read stdin',
+      text: 'write requires --from-json <file>, or - to read stdin',
     };
   }
 
