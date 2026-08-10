@@ -122,10 +122,14 @@ jobs:
           AGENT_MEMORY_SKILLS_HOME: ${{ runner.temp }}/skills
         run: |
           set -euo pipefail
-          cat > "$RUNNER_TEMP/nodes.json" <<'JSON'
+          # Assembled rather than written out. This value has to match the
+          # github-token pattern for the check to mean anything, which also means it
+          # matches every credential scanner pointed at this repository.
+          TOKEN="ghp_$(printf 'a%.0s' $(seq 36))"
+          cat > "$RUNNER_TEMP/nodes.json" <<JSON
           {"nodes":[
             {"id":"ci-smoke","type":"system","title":"CI smoke note",
-             "body":"Written by CI to prove the round trip. Token ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa must not survive.",
+             "body":"Written by CI to prove the round trip. Token $TOKEN must not survive.",
              "edges":[{"rel":"depends-on","dst":"ci-constraint"}]},
             {"id":"ci-constraint","type":"constraint","title":"CI constraint note",
              "body":"Constraints are never dropped from a truncated tree."}
@@ -137,7 +141,7 @@ jobs:
           agent-memory search "round trip"
 
           # Redaction must have fired before anything reached disk.
-          if grep -rq "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$AGENT_MEMORY_HOME"; then
+          if grep -rq "$TOKEN" "$AGENT_MEMORY_HOME"; then
             echo "raw token found on disk"; exit 1
           fi
 
