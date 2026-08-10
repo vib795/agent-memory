@@ -105,9 +105,15 @@ Every command takes `--json`. Every cap lives in `config.json` and is tunable.
 ### Where they run
 
 **Anywhere. There is one store per machine, not one per repository.** Everything
-lives under `~/.agents/memory`, no command ever writes into the repository you are
-standing in, and there is no per-repo setup step. `cd` between projects freely: the
-store does not move, split, or reset.
+lives under `~/.agents/memory`, nothing is written into the projects you point it
+at, and there is no per-repo setup step. `cd` between projects freely: the store
+does not move, split, or reset.
+
+One exception, and it is this repository rather than yours: if you installed from a
+clone, `npm install -g .` symlinks rather than copies, so `compact` regenerating the
+skill descriptions lands in your working tree and `skills/recall/SKILL.md` shows as
+modified. That is generated state, and [From a clone](#from-a-clone) says so. No
+project repository is ever written to.
 
 What the working directory changes is *scope*, never location.
 
