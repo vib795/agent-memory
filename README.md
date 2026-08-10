@@ -182,12 +182,19 @@ npm install -g @vib795/agent-memory
 agent-memory setup
 ```
 
-Straight from git works too, and needs no registry access:
+No registry access? Clone it and install the directory. This needs nothing but
+GitHub, and it is the path to use behind a proxy that blocks or quarantines npm:
 
 ```bash
-npm install -g https://github.com/vib795/agent-memory.git
+git clone https://github.com/vib795/agent-memory.git
+npm install -g ./agent-memory
 agent-memory setup
 ```
+
+**Do not install from the git URL directly.** `npm install -g <git-url>` fails for
+this package: npm links the package into `~/.npm/_cacache/tmp/git-clone*`, a
+directory it then cleans, and `postinstall` dies with `Cannot find module` before it
+can run. Cloning first avoids npm's git handling entirely. Verified on npm 11.18.
 
 Every release is mirrored to **GitHub Packages**. Treat that as redundancy rather
 than a second front door: GitHub Packages requires authentication even for public
