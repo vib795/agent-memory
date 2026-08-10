@@ -276,6 +276,17 @@ jobs:
           # managed desktop looks like, and `always-auth` is the exact key that did it.
           Add-Content -Path "$env:USERPROFILE\.npmrc" -Value "always-auth=true"
 
+          # Prove the seed before trusting it. install.ps1 sends npm through Out-Null,
+          # so a warning is invisible from the outside — if npm ever stops emitting one
+          # this test would keep passing while guarding nothing at all, which is worse
+          # than not having it. Assert the condition exists, then assert we survive it.
+          $probe = & npm ls -g --depth=0 2>&1 | Out-String
+          Write-Host "probe: $probe"
+          if ($probe -notmatch 'Unknown user config') {
+            Write-Host "::error::the npm warning this test depends on did not appear; it would pass vacuously"
+            exit 1
+          }
+
           $out = & powershell -ExecutionPolicy Bypass `
             -File "$env:RUNNER_TEMP\agent-memory-clone\install.ps1" 2>&1 | Out-String
           Write-Host $out
