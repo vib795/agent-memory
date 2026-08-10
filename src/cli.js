@@ -565,7 +565,20 @@ function main(argv) {
   try {
     result = fn(opts);
   } catch (err) {
-    result = { ok: false, error: err.message, text: `Error: ${err.message}` };
+    // err.message on its own loses the syscall and the path, which is the whole
+    // difference between "Path is a directory" and knowing which path and which
+    // operation. A user hitting this on a machine you cannot log into should be able
+    // to paste one line and have it be enough; a stack is one env var further.
+    const detail = [err.code, err.syscall, err.path].filter(Boolean).join(' ');
+    const line = detail ? `Error: ${err.message} [${detail}]` : `Error: ${err.message}`;
+    result = {
+      ok: false,
+      error: err.message,
+      code: err.code ?? null,
+      syscall: err.syscall ?? null,
+      path: err.path ?? null,
+      text: process.env.AGENT_MEMORY_DEBUG ? `${line}\n${err.stack}` : line,
+    };
   }
 
   if (opts.json) {

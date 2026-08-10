@@ -1,5 +1,5 @@
 import {
-  mkdirSync, rmSync, existsSync, lstatSync, symlinkSync, cpSync, readlinkSync, readFileSync,
+  mkdirSync, rmSync, rmdirSync, existsSync, lstatSync, symlinkSync, cpSync, readlinkSync, readFileSync,
 } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,8 +45,19 @@ function isLink(path) {
 function clear(path) {
   // A stale symlink must be removed as a link rather than followed, or clearing it
   // would delete the packaged skills on the other end.
-  if (isLink(path)) rmSync(path, { force: true });
-  else if (existsSync(path)) rmSync(path, { recursive: true, force: true });
+  if (isLink(path)) {
+    try {
+      rmSync(path, { force: true });
+    } catch {
+      // A Windows directory junction reports as a symbolic link but deletes like a
+      // directory, and rmSync without `recursive` can reject it as EISDIR. rmdirSync
+      // removes the junction itself and never descends, so the skills on the other
+      // end stay put — which is exactly what passing `recursive` here would risk.
+      rmdirSync(path);
+    }
+  } else if (existsSync(path)) {
+    rmSync(path, { recursive: true, force: true });
+  }
 }
 
 /**
