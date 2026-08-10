@@ -482,10 +482,21 @@ it. And because a request is charged per prompt rather than per tool call, captu
 that rides inside a turn you already paid for is free — which is why it can afford to
 happen at the moment the knowledge is fresh instead of whenever someone remembers.
 
+The inverse is reported too. Staleness answers *is this note still true*; it cannot
+answer *is there anything here yet*, and those fail in opposite directions — a repo
+nobody has ever captured in has no stale notes either, so it reads exactly like one
+that is fully covered. `tree` and `doctor` both say so:
+
+```
+47 commits since anything was captured for orders-api — /remember is behind
+```
+
+Measured to the *nearest* capture, so one fresh note closes the gap however old the
+rest of the graph is, and silent below `captureGapCommits` (50) so a young repo is
+never nagged. Silence has to mean covered, never empty.
+
 Not built yet, by choice:
 
-- A capture-gap signal — the store knows when a note has gone stale, but not yet when
-  a repo has moved a hundred commits with nothing captured at all
 - Team sharing, multi-machine sync
 - An MCP server. It would read this same store, so it is an addition, not a rewrite.
 

@@ -195,5 +195,8 @@ export function renderTree(result) {
     // most dangerous thing this tool could do, because it looks like an answer.
     out.push(`${result.omitted.length} nodes not shown, run agent-memory tree --all`);
   }
+  // The map is what recall reads before answering, so it is where a thin graph has to
+  // admit that it is thin. A short list and a silent footer read as full coverage.
+  if (result.gap?.note) out.push(result.gap.note);
   return out.join('\n');
 }

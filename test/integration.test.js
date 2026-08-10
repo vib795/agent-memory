@@ -399,6 +399,68 @@ test('commit counts, thresholds, and a rewritten history', () => {
   stale.resetCache();
 });
 
+test('capture gap reports a repo that has moved with nothing captured in it', () => {
+  // The inverse of staleness, and the one that leaves no trace: a repo nobody has
+  // captured in has no stale notes either, so it passes every other check while
+  // knowing nothing. Silence has to mean "covered", never "empty".
+  const repo = mkdtempSync(join(tmpdir(), 'agent-memory-gap-'));
+  const git = (...args) =>
+    execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'Test');
+
+  const commit = (n) => {
+    writeFileSync(join(repo, 'a.txt'), `v${n}`, 'utf8');
+    git('add', '.');
+    git('commit', '-qm', `c${n}`);
+  };
+  commit(0);
+  const first = git('rev-parse', 'HEAD');
+
+  const name = basename(repo);
+  const db = seed();
+  const cfg = { ...DEFAULTS, captureGapCommits: 10 };
+  try {
+    stale.resetCache();
+
+    // A young repo with nothing in it must stay quiet. Nagging on commit three is how
+    // a signal gets ignored by the time it matters.
+    assert.equal(stale.captureGap(db, { cwd: repo, cfg, repo: name }).note, null);
+
+    for (let i = 1; i <= 15; i++) commit(i);
+    stale.resetCache();
+    const empty = stale.captureGap(db, { cwd: repo, cfg, repo: name });
+    assert.equal(empty.notes, 0);
+    assert.match(empty.note, /nothing captured yet/, 'an empty graph over real history is reported');
+
+    // One capture at the very first commit is still 15 commits behind.
+    writeNote({
+      id: 'gap-note', type: 'system', title: 'Captured once', body: 'Long ago.',
+      repos: [name], captured_sha: first,
+    });
+    idx.reindex(db);
+    stale.resetCache();
+    const behind = stale.captureGap(db, { cwd: repo, cfg, repo: name });
+    assert.equal(behind.notes, 1);
+    assert.equal(behind.commits, 15);
+    assert.match(behind.note, /15 commits since anything was captured/);
+
+    // A single fresh note closes the gap, however old the rest of the graph is.
+    writeNote({
+      id: 'gap-note-2', type: 'system', title: 'Captured now', body: 'Current.',
+      repos: [name], captured_sha: git('rev-parse', 'HEAD'),
+    });
+    idx.reindex(db);
+    stale.resetCache();
+    assert.equal(stale.captureGap(db, { cwd: repo, cfg, repo: name }).note, null);
+  } finally {
+    db.close();
+    rmSync(repo, { recursive: true, force: true });
+    stale.resetCache();
+  }
+});
+
 // --- concurrency ---------------------------------------------------------------
 
 test('two concurrent writes both land, with no partial note left behind', async () => {
