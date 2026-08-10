@@ -322,32 +322,111 @@ A transcript summary reads fine and still leaves the next agent asking questions
 
 ## Use
 
-Two different jobs, and it is worth being clear about which is which.
+Three commands, two different jobs. You type the slash command in your agent; the
+agent runs the CLI. The terminal equivalents are shown so you can see what it did,
+and drive it by hand when you want to.
 
-**Moving a thread between windows.** In window A:
+### `/remember` — keep what stays true
 
-```
-/handoff
-```
-
-It prints a pickup line. In window B, any repo, paste it:
-
-```
-Read C:\Users\you\.agents\handoffs\migrate-orders-to-result-type.md and continue this work. Follow the Next action.
-```
-
-**Keeping what stays true.** `/handoff` also writes durable knowledge into the graph
-in the same request — same turn, no extra credit. Mid-session, when something worth
-keeping is established and you are not switching windows:
+Mid-session, when something worth keeping has been established:
 
 ```
 /remember
 /remember the retry policy on the orders webhook
 ```
 
-And in any repo, later, ask a question that memory should already answer. The agent
-invokes `/recall` on its own, because the skill description tells it what is in
-there.
+Bare, it selects the durable knowledge itself. With an argument, it writes that and
+nothing else. Either way it makes one terminal call, and `write` reports each id:
+
+```
+created auth-service [system]
+created use-sessions [decision]
+warning: use-sessions: redacted 1x github-token
+```
+
+That warning is the redactor firing before anything reached disk. The skill then
+repeats the list back to you with titles attached, so you can see what was captured
+without opening the files.
+
+What it ran, which you can run yourself:
+
+```bash
+agent-memory write --from-json - --source remember <<'JSON'
+{"nodes":[
+  {"id":"use-sessions","type":"decision",
+   "title":"Chose server sessions over JWT",
+   "body":"Why: revocation had to take effect immediately.\nRejected: short-TTL JWT, because logout would lag by the TTL.\nImplemented in src/auth/session.js:42.",
+   "edges":[{"rel":"evidence-for","dst":"auth-service"}]}
+]}
+JSON
+```
+
+### `/recall` — answer from memory before deriving again
+
+You rarely type this one. Ask a question memory should already answer and the agent
+invokes it on its own, because the skill description advertises what is in the store:
+
+```
+Why do we use sessions instead of JWT here?
+/recall the auth decision
+```
+
+It reads the routing map first, then pulls only the notes it needs:
+
+```bash
+agent-memory tree                      # what exists, scoped to this repo
+agent-memory get use-sessions --depth 1   # that note plus its neighbourhood
+agent-memory search "session revocation"  # full text, when the tree misses
+```
+
+A note that is still current prints clean, with its edges:
+
+```
+## use-sessions  [decision]  depth 0
+Chose server sessions over JWT
+
+Why: revocation had to take effect immediately.
+
+  -> evidence-for auth-service
+```
+
+Once the code has moved on underneath it, the same note arrives carrying the warning.
+This is the part that keeps the store honest:
+
+```
+## use-sessions  [decision]  depth 0  [captured 47 commits ago — verify before trusting]
+```
+
+### `/handoff` — move a thread to another window
+
+In window A:
+
+```
+/handoff
+```
+
+It writes the working-state file and prints a pickup line. In window B, any repo,
+paste it:
+
+```
+Read ~/.agents/handoffs/migrate-orders-to-result-type.md and continue this work. Follow the Next action.
+```
+
+`/handoff` also writes durable knowledge into the graph in the same request — same
+turn, no extra request charged. To see what it produced:
+
+```bash
+ls ~/.agents/handoffs/           # index.md, <thread>.md, one <thread>.prev.md
+agent-memory tree                # the nodes it captured on the way past
+```
+
+### Housekeeping
+
+```bash
+agent-memory doctor              # after install, after an upgrade, when something looks off
+agent-memory compact             # dedup, decay, regenerate the routing digest
+agent-memory tree --repo         # every repo, not just this one
+```
 
 ## Where things live
 
