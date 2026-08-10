@@ -104,7 +104,7 @@ const SECRETS = [
   ['aws-access-key', 'key AKIAIOSFODNN7EXAMPLE here'],
   ['github-token', 'ghp_abcdefghijklmnopqrstuvwxyz0123456789'],
   ['slack-token', 'xoxb-1234567890-abcdefghij'],
-  ['google-api-key', 'AIzaSyA1234567890abcdefghijklmnopqrstuv'],
+  ['google-api-key', `AIza${'E'.repeat(35)}`],
   ['anthropic-key', 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz'],
   ['jwt', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r'],
   ['bearer-token', 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456'],
