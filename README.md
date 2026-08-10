@@ -398,9 +398,39 @@ What is deliberately unproven, and where you will find out: the cold-read test �
 fresh chat in a repo untouched for a month, answering correctly from the digest
 alone. That needs real elapsed time and cannot be faked in a test suite.
 
+## Update
+
+An upgrade is not finished until `setup` has run again. Prompt files are copies
+rather than links, so an editor keeps reading the old text until something rewrites
+them, and nothing warns you.
+
+**Installed from npm:**
+
+```bash
+npm install -g @vib795/agent-memory@latest
+agent-memory setup
+```
+
+**Installed from a clone** — one command, which pulls and re-runs the installer:
+
+```bash
+./update.sh                                            # macOS / Linux
+powershell -ExecutionPolicy Bypass -File .\update.ps1  # Windows
+```
+
+Both end in `agent-memory doctor`, so you find out immediately if an agent was left
+holding stale files. Your notes are never touched by an upgrade.
+
 ## Uninstall
 
 Order matters, and npm will not do it for you:
+
+```bash
+./uninstall.sh                                            # macOS / Linux
+powershell -ExecutionPolicy Bypass -File .\uninstall.ps1  # Windows
+```
+
+Or by hand, which is the same two steps in the same order:
 
 ```bash
 agent-memory uninstall      # first — removes every skill link and prompt file

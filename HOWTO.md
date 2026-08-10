@@ -236,16 +236,17 @@ Prompt files are copies, not links, so they do not update themselves.
 
 ### GitHub Copilot CLI
 
-**Not supported, deliberately.** It is detected, and `setup` tells you it is skipping it.
+**Supported.** `setup` installs the three skills into `~/.copilot/skills/<name>/`, and
+they appear as `/handoff`, `/remember` and `/recall`.
 
-Copilot CLI has no user-wide place to put instructions, so there is nothing to install
-into. Writing a file into its config folder on a hunch is how you ship something that
-does nothing while claiming to work.
+GitHub documents two personal skill directories, `~/.copilot/skills` and
+`~/.agents/skills`, and Copilot reads both. The shared one is always written, so
+Copilot is served even on a machine that has never run the CLI; the `.copilot` one is
+written as well when that directory exists, so a machine that has run it keeps its
+skills where its own documentation says to look.
 
-If you want memory in a specific repository with Copilot CLI, add the instructions to
-that repo's `.github/copilot-instructions.md` by hand. That works, but you have to do it
-per repository — which is the exact problem this package exists to solve everywhere
-else.
+Earlier versions of this guide said Copilot CLI was unsupported. That was true when it
+was written and stopped being true in 0.1.5.
 
 ---
 
@@ -326,9 +327,40 @@ agent-memory doctor
 
 ---
 
-## 12. Removing it
+## 12. Updating it
 
-**The order matters, and npm will not do it for you:**
+**Installed from npm:**
+
+```bash
+npm install -g @vib795/agent-memory@latest
+agent-memory setup
+```
+
+The second line is not optional. Prompt files are copies rather than links, so VS Code
+keeps reading the old text until something rewrites them, and nothing warns you.
+
+**Installed from a clone** — one command, which pulls and re-runs the installer:
+
+```bash
+./update.sh                                            # macOS / Linux
+powershell -ExecutionPolicy Bypass -File .\update.ps1  # Windows
+```
+
+Both finish with `agent-memory doctor`, so you find out straight away if a tool was
+left holding stale files. Your notes are never touched by an upgrade.
+
+---
+
+## 13. Removing it
+
+**One command, which does the two steps in the order that works:**
+
+```bash
+./uninstall.sh                                            # macOS / Linux
+powershell -ExecutionPolicy Bypass -File .\uninstall.ps1  # Windows
+```
+
+**Or by hand. The order matters, and npm will not do it for you:**
 
 ```bash
 agent-memory uninstall          # first — this removes the commands from your tools

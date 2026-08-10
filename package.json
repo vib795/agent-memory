@@ -1,6 +1,6 @@
 {
   "name": "@vib795/agent-memory",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Durable cross-repo knowledge graph for GitHub Copilot and Claude Code. Markdown source of truth, disposable SQLite index, zero runtime dependencies.",
   "keywords": [
     "github-copilot",
@@ -36,6 +36,10 @@
     "skills/",
     "install.sh",
     "install.ps1",
+    "update.sh",
+    "update.ps1",
+    "uninstall.sh",
+    "uninstall.ps1",
     "README.md",
     "HOWTO.md",
     "LICENSE"
