@@ -100,17 +100,30 @@ test('duplicate edges collapse to one', () => {
 
 // --- redaction ---------------------------------------------------------------
 
+/**
+ * Build a credential-shaped fixture at runtime.
+ *
+ * These values have to match the patterns in redact.js or the tests prove nothing,
+ * which also means they match every credential scanner pointed at this repository.
+ * A hand-typed fixture already cost one false-positive secret-scanning alert, and
+ * "it was only a test file" is not a sentence anyone wants to be reading at the time.
+ *
+ * Assembling them from a repeated character keeps the coverage and leaves no
+ * credential-shaped literal in the source for a scanner, or a reader, to find.
+ */
+const fake = (prefix, len, char = 'E') => `${prefix}${char.repeat(len)}`;
+
 const SECRETS = [
-  ['aws-access-key', 'key AKIAIOSFODNN7EXAMPLE here'],
-  ['github-token', 'ghp_abcdefghijklmnopqrstuvwxyz0123456789'],
-  ['slack-token', 'xoxb-1234567890-abcdefghij'],
-  ['google-api-key', `AIza${'E'.repeat(35)}`],
-  ['anthropic-key', 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz'],
-  ['jwt', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r'],
-  ['bearer-token', 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456'],
-  ['connection-string', 'postgres://admin:hunter2@db.example.com:5432/app'],
-  ['assigned-secret', 'password = "correcthorsebattery"'],
-  ['session-cookie', 'JSESSIONID=A1B2C3D4E5F6G7H8I9J0'],
+  ['aws-access-key', `key ${fake('AKIA', 16)} here`],
+  ['github-token', fake('ghp_', 36)],
+  ['slack-token', fake('xoxb-', 12, '1')],
+  ['google-api-key', fake('AIza', 35)],
+  ['anthropic-key', fake('sk-ant-api03-', 24)],
+  ['jwt', [fake('eyJ', 12), fake('eyJ', 12), fake('S', 20)].join('.')],
+  ['bearer-token', `Authorization: ${fake('Bearer ', 32)}`],
+  ['connection-string', `postgres://admin:${fake('', 12, 'p')}@db.example.com:5432/app`],
+  ['assigned-secret', `password = "${fake('', 20, 'p')}"`],
+  ['session-cookie', `JSESSIONID=${fake('', 20, 'A')}`],
   ['private-ip', 'host 10.20.30.40 responds'],
   ['internal-host', 'reachable at billing.internal only'],
 ];
@@ -154,8 +167,8 @@ test('redact fails closed on a non-string rather than passing it through', () =>
 test('redactNode scans both title and body', () => {
   const { node, findings } = redactNode({
     ...base,
-    title: 'key AKIAIOSFODNN7EXAMPLE',
-    body: 'ghp_abcdefghijklmnopqrstuvwxyz0123456789',
+    title: `key ${fake('AKIA', 16)}`,
+    body: fake('ghp_', 36),
   });
   assert.ok(node.title.includes('<redacted:aws-access-key>'));
   assert.ok(node.body.includes('<redacted:github-token>'));
