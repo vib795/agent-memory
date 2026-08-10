@@ -70,11 +70,14 @@ agent-memory setup
 you have. Modern npm refuses to let a package run its own setup automatically — a
 sensible security default — so the second line is you giving permission, by hand.
 
-> No access to the npm registry at work? This works too, and needs nothing but GitHub:
+> No access to the npm registry at work? Clone it instead. This needs nothing but
+> GitHub, and it is what to use if your company proxy blocks or quarantines npm:
 > ```bash
-> npm install -g https://github.com/vib795/agent-memory.git
+> git clone https://github.com/vib795/agent-memory.git
+> npm install -g ./agent-memory
 > agent-memory setup
 > ```
+> Clone first — installing from the git URL directly does not work. See the README.
 
 ### What just happened
 
