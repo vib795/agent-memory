@@ -272,15 +272,20 @@ jobs:
           AGENT_MEMORY_HOME: ${{ runner.temp }}/ps1-store
           AGENT_MEMORY_SKILLS_HOME: ${{ runner.temp }}/ps1-home
         run: |
-          # An unknown key makes npm warn on stderr on every invocation, which is what a
-          # managed desktop looks like. Ask npm where its user config lives rather than
-          # assuming ~/.npmrc: this runner uses a custom prefix, and a seed written to
-          # the wrong file produces no warning and a test that proves nothing. The key
-          # is deliberately nonsense — `always-auth` is what broke the real desktop, but
-          # some npm versions still recognise it, and this test needs a guaranteed warn.
+          # Rejecting a removed config key with a warning is npm 11 behaviour. Node 22
+          # ships npm 10, which accepts `always-auth` in silence — so on a default
+          # runner there is no stderr, nothing to turn into an ErrorRecord, and this
+          # test reproduces nothing. Install the npm that actually warns, matching the
+          # desktop that reported the bug.
+          npm install -g npm@11 2>&1 | Out-Null
+          Write-Host "npm version: $(npm --version)"
+
+          # Ask npm where its user config lives rather than assuming ~/.npmrc; this
+          # runner uses a custom prefix, and a seed written to the wrong file is a test
+          # that proves nothing.
           $userconfig = (& npm config get userconfig 2>&1 | Out-String).Trim()
           Write-Host "npm userconfig: $userconfig"
-          Add-Content -Path $userconfig -Value "agent-memory-seeded-unknown-key=1"
+          Add-Content -Path $userconfig -Value "always-auth=true"
 
           # Prove the seed before trusting it. install.ps1 sends npm through Out-Null,
           # so a warning is invisible from the outside — if npm ever stops emitting one
