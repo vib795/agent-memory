@@ -31,6 +31,7 @@ export const DEFAULTS = {
   decayDays: 90, // archive threshold for unreferenced, unread notes
   staleAnnotateCommits: 10, // below this, staleness is not worth mentioning
   staleReviewCommits: 100, // above this, doctor flags it for review
+  captureGapCommits: 50, // repo movement with no capture at all before it is worth saying
   compactThreshold: 10, // node-count delta that triggers an automatic compact
 };
 

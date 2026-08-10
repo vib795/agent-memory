@@ -9,7 +9,7 @@ import {
 import { neighborhood, applyBudget } from './graph.js';
 import { buildTree, renderTree, buildDigest } from './digest.js';
 import { compact, maybeCompact } from './compact.js';
-import { staleness, currentRepo, reviewCandidates } from './staleness.js';
+import { staleness, currentRepo, reviewCandidates, captureGap } from './staleness.js';
 import { setup as runSetup, unlinkSkills, danglingSkillLinks, SKILLS } from './setup.js';
 import { detectTargets, installableTargets } from './targets.js';
 import { join } from 'node:path';
@@ -210,8 +210,11 @@ function cmdTree(opts) {
   const db = openDb();
   const repo = opts.repo === true ? null : (opts.repo ?? currentRepo());
   const result = buildTree(db, { repo, all: !!opts.all, cfg });
+  // Only when scoped to a repo. Across all repos there is no single history to
+  // measure against, and a number that means nothing is worse than no number.
+  const gap = repo ? captureGap(db, { cfg, repo }) : null;
   db.close();
-  return { ok: true, ...result, text: renderTree(result) };
+  return { ok: true, ...result, gap, text: renderTree({ ...result, gap }) };
 }
 
 function cmdGet(opts) {
@@ -515,6 +518,21 @@ function cmdDoctor() {
     stale.length === 0,
     stale.length ? `${stale.length} notes worth reviewing` : 'nothing far behind HEAD',
   );
+
+  // The opposite failure to staleness, and the one that leaves no trace: a repo where
+  // nothing was ever captured has no stale notes either, so it passes every check
+  // above while knowing nothing at all.
+  const gap = captureGap(db, { cfg });
+  add(
+    'capture gap',
+    !gap?.note,
+    gap?.note
+      ?? (!gap
+        ? 'not in a repository'
+        : gap.notes === 0
+          ? `nothing captured for ${gap.repo} yet, and not enough history for that to mean anything`
+          : `${gap.notes} notes, nearest capture is current`),
+  );
   db.close();
 
   const text = [
@@ -525,9 +543,9 @@ function cmdDoctor() {
   ].join('\n');
 
   // Staleness is a report, not a failure. Being told about it is the whole feature.
-  const advisory = new Set(['staleness', 'skills linked']);
+  const advisory = new Set(['staleness', 'capture gap', 'skills linked']);
   const fatal = checks.filter((c) => !c.ok && !advisory.has(c.name));
-  return { ok: fatal.length === 0, checks, stale, digest, text };
+  return { ok: fatal.length === 0, checks, stale, gap, digest, text };
 }
 
 // --- dispatch ---------------------------------------------------------------

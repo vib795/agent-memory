@@ -145,6 +145,68 @@ export function reviewCandidates(db, { cwd = process.cwd(), cfg = loadConfig() }
   return out;
 }
 
+/**
+ * How far this repository has moved since anything was captured in it at all.
+ *
+ * Staleness answers "is this note still true". It cannot answer "is there anything
+ * here yet", and those fail in opposite directions: a repository nobody has ever run
+ * `/remember` in has no stale notes to warn about, so it reads exactly like one that
+ * is fully covered. Silence means both "all good" and "nothing here", which is the
+ * same conflation `doctor` already refuses to make about installed skills.
+ *
+ * Measured as the distance from HEAD to the nearest capture, so a single fresh note
+ * closes the gap no matter how old the rest of the graph is.
+ */
+export function captureGap(db, { cwd = process.cwd(), cfg = loadConfig(), repo } = {}) {
+  const here = repo ?? currentRepo(cwd);
+  if (!here) return null;
+
+  const rows = db
+    .prepare('SELECT id, captured_sha FROM nodes WHERE archived = 0 AND captured_sha IS NOT NULL')
+    .all();
+  const repoStmt = db.prepare('SELECT repo FROM node_repos WHERE node_id = ?');
+
+  let scoped = 0;
+  let nearest = null;
+  for (const row of rows) {
+    const repos = repoStmt.all(row.id).map((r) => r.repo);
+    if (repos.length && !repos.includes(here)) continue;
+    scoped += 1;
+    const res = commitsSince(row.captured_sha, cwd);
+    if (res.status !== 'ok') continue;
+    if (nearest === null || res.count < nearest) nearest = res.count;
+  }
+
+  if (scoped === 0) {
+    // A repository with three commits in it does not need to be told it has no
+    // memory yet. Only say this once there is enough history for the absence to
+    // mean something.
+    let depth = 0;
+    try {
+      depth = Number.parseInt(git(['rev-list', '--count', 'HEAD'], cwd), 10) || 0;
+    } catch {
+      return null;
+    }
+    if (depth < cfg.captureGapCommits) return { repo: here, notes: 0, commits: null, note: null };
+    return {
+      repo: here,
+      notes: 0,
+      commits: depth,
+      note: `nothing captured yet for ${here} — ${depth} commits of history and an empty graph`,
+    };
+  }
+
+  if (nearest === null || nearest < cfg.captureGapCommits) {
+    return { repo: here, notes: scoped, commits: nearest, note: null };
+  }
+  return {
+    repo: here,
+    notes: scoped,
+    commits: nearest,
+    note: `${nearest} commits since anything was captured for ${here} — /remember is behind`,
+  };
+}
+
 /** Testing seam: the per-process cache would otherwise outlive a fixture repo. */
 export function resetCache() {
   cache.clear();
