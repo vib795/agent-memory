@@ -181,3 +181,65 @@ jobs:
             || { echo "uninstall deleted a prompt file it did not write"; exit 1; }
           test -f "$AGENT_MEMORY_HOME/notes/system/ci-smoke.md" \
             || { echo "uninstall destroyed a note"; exit 1; }
+
+  # The README tells anyone behind a proxy that blocks or quarantines npm to clone
+  # the repository and install that directory. For one release the documented
+  # command was `npm install -g <git-url>` instead, which does not work at all: npm
+  # links the package into ~/.npm/_cacache/tmp/git-clone*, deletes that directory,
+  # and postinstall dies with "Cannot find module". Nothing here noticed, because
+  # the job above only ever installs the packed tarball. A documented install path
+  # that nothing exercises is a claim, not a feature — so exercise it.
+  clone-install:
+    name: clone install / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install the checkout as a directory, the way the README says
+        shell: bash
+        env:
+          AGENT_MEMORY_HOME: ${{ runner.temp }}/clone-store
+          AGENT_MEMORY_SKILLS_HOME: ${{ runner.temp }}/clone-home
+        run: |
+          set -euo pipefail
+          # actions/checkout is itself a clone. Copying it out of the workspace makes
+          # this the documented "clone somewhere, install that directory" rather than
+          # an install of the tree npm is already standing in.
+          clone="$RUNNER_TEMP/agent-memory-clone"
+          rm -rf "$clone"
+          cp -R "$GITHUB_WORKSPACE" "$clone"
+          rm -rf "$clone/node_modules"
+
+          npm install -g "$clone"
+
+          # The bug this guards against reports a successful install and leaves no
+          # files behind, so assert on the files rather than on the exit code. If the
+          # package ever resolves into a transient cache directory again, these fail.
+          # npm on Windows answers with a CRLF and backslashes, and a backslash is an
+          # escape character in bash. Normalise both or every check below silently
+          # tests a path that cannot exist.
+          root="$(npm root -g | tr -d '\r' | tr '\\' '/')"
+          pkg="$root/@vib795/agent-memory"
+          for f in package.json src/cli.js scripts/postinstall.js skills/recall/SKILL.md; do
+            test -f "$pkg/$f" || { echo "::error::$f is missing from the install at $pkg"; exit 1; }
+          done
+
+          # npm gates postinstall behind allow-scripts, so setup is the documented
+          # second command here exactly as it is for a registry install.
+          agent-memory setup
+          for s in handoff recall remember; do
+            test -f "$AGENT_MEMORY_SKILLS_HOME/.agents/skills/$s/SKILL.md" \
+              || { echo "::error::$s not linked by setup"; exit 1; }
+          done
+
+          # doctor's `skills installed` check is fatal, so this fails the job if the
+          # CLI landed on PATH while every agent directory stayed empty.
+          agent-memory doctor
