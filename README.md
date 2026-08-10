@@ -102,6 +102,71 @@ agent-memory doctor                        preflight and health report
 
 Every command takes `--json`. Every cap lives in `config.json` and is tunable.
 
+### Where they run
+
+**Anywhere. There is one store per machine, not one per repository.** Everything
+lives under `~/.agents/memory`, no command ever writes into the repository you are
+standing in, and there is no per-repo setup step. `cd` between projects freely: the
+store does not move, split, or reset.
+
+What the working directory changes is *scope*, never location.
+
+| Command | Reads | What the current repo changes |
+|---|---|---|
+| `init` | whole store | nothing |
+| `index` | whole store | nothing |
+| `compact` | whole store | nothing |
+| `doctor` | whole store | nothing |
+| `search` | whole store | nothing — full text hits every note in every repo |
+| `get` | whole store | the staleness line only; the note is found by id either way |
+| `tree` | whole store | **filters it** — defaults to the current repo |
+| `write` | whole store | **is stamped into the note** — see below |
+
+The current repo is `git rev-parse --show-toplevel` reduced to its directory name.
+Outside a git repository it is `null` and every command still works: `tree` comes
+back unscoped, and a new note carries no repo and no capture SHA, so it gets no
+staleness signal for the rest of its life.
+
+`write` is the one worth understanding, because it is the one that fixes facts in
+place. Run from `~/work/orders-api` it stamps `repos: [orders-api]`, records that
+repo's HEAD as `captured_sha`, and adds your `git config user.email` to the
+redactor's keep list so your own address survives while every other one is removed.
+Run the same JSON from your home directory and you get a note with no repo and no
+staleness anchor. **Capture from inside the repository the knowledge is about** —
+that is the whole reason `/remember` is worth invoking where you are working.
+
+Two flags that do not mean what they look like:
+
+- `agent-memory tree --repo`, with no value, means *all repos*. A bare `--repo`
+  clears the default scope rather than confirming it; `--repo <name>` points it at
+  a different repo.
+- `--all` is unrelated to scope. It prints every node instead of truncating to the
+  `treeLines` cap, which is what the `run agent-memory tree --all` hint at the
+  bottom of a truncated tree is telling you.
+
+One sharp edge: repo identity is the **directory name**, not the remote URL. Two
+clones both sitting in a directory called `utils` are one repo as far as the store
+is concerned. If you work across orgs, clone into distinct directory names.
+
+### How often they run
+
+Only `init` is a once-per-machine command, and `agent-memory setup` already ran it.
+
+| Command | When |
+|---|---|
+| `init` | once, via `setup`. Again only to register extra skill paths |
+| `write` | every capture |
+| `tree`, `get`, `search` | every lookup |
+| `index` | repair only — `write` reindexes on every call. Run it after hand-editing or deleting notes, or after deleting `index.db` |
+| `compact` | occasionally. Nothing schedules it: no daemon, no cron, no hook |
+| `doctor` | after install, after an upgrade, and whenever something looks wrong |
+
+**You will not type most of these.** `/remember` and `/handoff` call `write`;
+`/recall` calls `tree`, `get` and `search`. They are documented so you can see what
+the skills are doing and drive it by hand when you want to, but the daily loop is
+two slash commands in a chat box. The ones a person actually types are `setup`,
+`doctor`, and `compact` now and then.
+
 ## Install
 
 Two commands, and the second one is not optional:
@@ -224,7 +289,7 @@ is generated state, and the committed value is only a placeholder.
 Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old, and
 `postinstall` refuses rather than failing your install.
 
-Run `npm test` for the suite (71 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (74 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 
