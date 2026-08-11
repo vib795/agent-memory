@@ -15,7 +15,7 @@ import { compact, maybeCompact } from './compact.js';
 import { staleness, currentRepo, reviewCandidates, captureGap } from './staleness.js';
 import { setup as runSetup, unlinkSkills, danglingSkillLinks, SKILLS } from './setup.js';
 import { detectTargets, installableTargets } from './targets.js';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { atomicWrite } from './atomic.js';
 
 /**
@@ -807,6 +807,11 @@ function cmdEngagement(opts) {
       text: [
         `Purged engagement ${name}: ${notes} note${notes === 1 ? '' : 's'} removed.`,
         `${dir} no longer exists.`,
+        '',
+        // Said every time, because the gap between "the store is gone" and "their
+        // knowledge is gone" is exactly the assumption someone would make here.
+        'Handoff files are not part of an engagement store and were not touched.',
+        `Review ${join(dirname(STORE_BASE), 'handoffs')} yourself.`,
       ].join('\n'),
     };
   }

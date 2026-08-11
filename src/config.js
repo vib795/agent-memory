@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname, parse as parsePath } from 'node:path';
 import { homedir } from 'node:os';
 import { atomicWrite } from './atomic.js';
@@ -85,6 +85,8 @@ export const paths = {
   db: join(STORE_ROOT, 'index.db'),
   routing: join(STORE_ROOT, 'ROUTING.md'),
   config: join(STORE_ROOT, 'config.json'),
+  // Machine-scoped keys live beside every engagement rather than inside one.
+  machineConfig: join(STORE_BASE, 'config.json'),
   typeDir: (type) => join(STORE_ROOT, 'notes', type),
   archiveTypeDir: (type) => join(STORE_ROOT, 'notes', 'archive', type),
 };
@@ -107,22 +109,39 @@ export const DEFAULTS = {
 // from a checkout or copied into place, and both are legitimate installs.
 export const LIST_KEYS = ['skillPaths'];
 
-export function loadConfig() {
-  if (!existsSync(paths.config)) return { ...DEFAULTS, skillPaths: [] };
+/** A malformed config must not take the store down. Absent and unreadable are equal. */
+function readJson(file) {
+  if (!existsSync(file)) return {};
   try {
-    const raw = JSON.parse(readFileSync(paths.config, 'utf8'));
-    const merged = { ...DEFAULTS, skillPaths: [] };
-    for (const [k, v] of Object.entries(raw)) {
-      if (k in DEFAULTS && typeof v === 'number' && Number.isFinite(v) && v > 0) merged[k] = v;
-      if (LIST_KEYS.includes(k) && Array.isArray(v)) {
-        merged[k] = v.filter((s) => typeof s === 'string' && s.trim());
-      }
-    }
-    return merged;
+    return JSON.parse(readFileSync(file, 'utf8'));
   } catch {
-    // A malformed config must not take the store down. Defaults are always valid.
-    return { ...DEFAULTS, skillPaths: [] };
+    return {};
   }
+}
+
+/**
+ * Config comes from two files, split by what each key actually describes.
+ *
+ * Where the skills are installed is a fact about this machine. Every engagement
+ * shares one set of skill files, so registering them per engagement meant `compact`
+ * had nothing to regenerate after a switch and the recall description kept
+ * advertising the previous engagement's topics — into the agent's context, which is
+ * the worst place for it. Caps like the digest size really are per-store, and stay
+ * there. For the default engagement both files are the same path and nothing moves.
+ */
+export function loadConfig() {
+  const merged = { ...DEFAULTS, skillPaths: [] };
+
+  for (const [k, v] of Object.entries(readJson(paths.config))) {
+    if (k in DEFAULTS && typeof v === 'number' && Number.isFinite(v) && v > 0) merged[k] = v;
+  }
+  const machine = readJson(paths.machineConfig);
+  for (const k of LIST_KEYS) {
+    if (Array.isArray(machine[k])) {
+      merged[k] = machine[k].filter((s) => typeof s === 'string' && s.trim());
+    }
+  }
+  return merged;
 }
 
 /**
@@ -136,24 +155,37 @@ export function loadConfig() {
  * cannot quietly become permanent state.
  */
 export function saveConfig(patch) {
-  const current = existsSync(paths.config)
-    ? (() => {
-        try {
-          return JSON.parse(readFileSync(paths.config, 'utf8'));
-        } catch {
-          return {};
-        }
-      })()
-    : {};
+  const sameFile = paths.config === paths.machineConfig;
+  const caps = readJson(paths.config);
+  const machine = sameFile ? caps : readJson(paths.machineConfig);
 
-  const next = { ...current };
+  let capsDirty = false;
+  let machineDirty = false;
   for (const [k, v] of Object.entries(patch || {})) {
-    if (k in DEFAULTS && typeof v === 'number' && Number.isFinite(v) && v > 0) next[k] = v;
+    if (k in DEFAULTS && typeof v === 'number' && Number.isFinite(v) && v > 0) {
+      caps[k] = v;
+      capsDirty = true;
+    }
     if (LIST_KEYS.includes(k) && Array.isArray(v)) {
-      next[k] = [...new Set(v.filter((s) => typeof s === 'string' && s.trim()))].sort();
+      machine[k] = [...new Set(v.filter((s) => typeof s === 'string' && s.trim()))].sort();
+      machineDirty = true;
     }
   }
 
-  atomicWrite(paths.config, `${JSON.stringify(next, null, 2)}\n`);
-  return next;
+  if (sameFile) {
+    if (capsDirty || machineDirty) {
+      mkdirSync(dirname(paths.config), { recursive: true });
+      atomicWrite(paths.config, `${JSON.stringify(caps, null, 2)}\n`);
+    }
+    return { ...caps };
+  }
+  if (capsDirty) {
+    mkdirSync(dirname(paths.config), { recursive: true });
+    atomicWrite(paths.config, `${JSON.stringify(caps, null, 2)}\n`);
+  }
+  if (machineDirty) {
+    mkdirSync(dirname(paths.machineConfig), { recursive: true });
+    atomicWrite(paths.machineConfig, `${JSON.stringify(machine, null, 2)}\n`);
+  }
+  return { ...caps, ...Object.fromEntries(LIST_KEYS.map((k) => [k, machine[k]]).filter(([, v]) => v)) };
 }
