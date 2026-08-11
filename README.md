@@ -94,6 +94,36 @@ recursive CTE *is* the graph engine, and `UNION` plus a depth bound is what keep
 - **Constraints are never dropped.** At any cap, in either tier. A constraint is what
   stops an agent burning a retry loop on an approach that was never going to ship.
 
+## Carrying knowledge between machines
+
+Client work usually lives in its own environment, and when the engagement ends the
+environment goes with it. What should survive is the part that was never the
+client's — the constraints your org imposes, the conventions you follow, what you
+have learned about working under them. What must not survive is their architecture.
+
+```bash
+agent-memory export --out carry.json     # global scope only, by default
+agent-memory import carry.json --dry-run # see what would land
+agent-memory import carry.json
+```
+
+**The default is the safe one.** `export` emits `scope: global` notes and nothing
+else, so a note tied to a client repository cannot leave by forgetting a flag.
+Taking one is possible — `--scope all` — but it takes saying so.
+
+Two things are deliberately dropped on the way through:
+
+- **`captured_sha` is not carried.** It names a commit that exists in one repository
+  on one machine. Carried across, it would either read as current forever or claim
+  the history was rewritten; a staleness signal you cannot check is worse than none.
+- **`source` becomes `import`.** How a note was originally captured describes an
+  environment that no longer exists. Here the honest answer to where it came from is
+  that someone brought it in, and an audit should be able to tell which notes those
+  are.
+
+Importing the same file twice updates rather than duplicates, so re-running after a
+change is safe.
+
 ## Engagements
 
 If you work for more than one client on one machine, knowledge from one of them is

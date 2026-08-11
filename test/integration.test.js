@@ -965,6 +965,73 @@ test('one engagement cannot read another, on any retrieval path', () => {
   }
 });
 
+test('export carries what is portable and leaves the client behind', () => {
+  // Client work lives in its own environment and goes away with it. What should
+  // survive is what was never the client's; what must not survive is their
+  // architecture. The default has to be safe, because the mistake is silent.
+  const from = mkdtempSync(join(tmpdir(), 'agent-memory-from-'));
+  const to = mkdtempSync(join(tmpdir(), 'agent-memory-to-'));
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const run = (home, args, input) =>
+    spawnSync(process.execPath, [cli, ...args], {
+      env: { ...process.env, AGENT_MEMORY_HOME: home },
+      input,
+      encoding: 'utf8',
+    });
+
+  try {
+    const seeded = run(from, ['write', '--from-json', '-'], JSON.stringify({
+      nodes: [
+        {
+          id: 'no-background-services', type: 'constraint', scope: 'global', repos: [],
+          title: 'No new background services', body: 'Security will not approve one.',
+        },
+        {
+          id: 'client-iam-layout', type: 'system', title: 'Client IAM layout',
+          body: 'Account detail that is theirs, not mine.', repos: ['client-infra'],
+        },
+      ],
+    }));
+    assert.equal(seeded.status, 0);
+
+    const exported = JSON.parse(run(from, ['export']).stdout);
+    const ids = exported.nodes.map((n) => n.id);
+    assert.deepEqual(ids, ['no-background-services'], 'default scope is global and nothing else');
+    assert.ok(
+      !exported.nodes.some((n) => 'captured_sha' in n),
+      'a commit hash from another environment cannot be checked here, so it is not carried',
+    );
+
+    // Taking a client's notes has to be possible, but only by saying so.
+    const everything = JSON.parse(run(from, ['export', '--scope', 'all']).stdout);
+    assert.ok(everything.nodes.some((n) => n.id === 'client-iam-layout'));
+
+    const file = join(from, 'carry.json');
+    writeFileSync(file, JSON.stringify(exported), 'utf8');
+
+    const dry = run(to, ['import', file, '--dry-run']);
+    assert.equal(dry.status, 0);
+    assert.match(dry.stdout, /would create no-background-services/);
+    assert.ok(!existsSync(join(to, 'notes', 'constraint', 'no-background-services.md')),
+      'a dry run writes nothing');
+
+    assert.equal(run(to, ['import', file]).status, 0);
+    assert.ok(existsSync(join(to, 'notes', 'constraint', 'no-background-services.md')));
+
+    // Import must not relabel imported knowledge as observed in this environment.
+    const landed = readFileSync(join(to, 'notes', 'constraint', 'no-background-services.md'), 'utf8');
+    assert.doesNotMatch(landed, /captured_sha: [0-9a-f]/, 'no local commit is stamped on');
+    assert.match(landed, /source: import/);
+
+    // Importing the same file twice is an update, not a duplicate.
+    assert.equal(run(to, ['import', file]).status, 0);
+    assert.match(run(to, ['tree', '--repo']).stdout, /1 notes/);
+  } finally {
+    rmSync(from, { recursive: true, force: true });
+    rmSync(to, { recursive: true, force: true });
+  }
+});
+
 // --- uninstall ---------------------------------------------------------------------
 
 test('uninstall removes our links and prompt files, spares foreign ones, keeps notes', () => {

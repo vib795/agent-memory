@@ -86,6 +86,9 @@ const USAGE = `agent-memory — durable cross-repo knowledge for coding agents
         [--source <name>] [--repo <name>]
   compact                                dedup, decay, reindex, regenerate
   doctor                                 preflight and health report
+  export [--scope global|repo|all]       knowledge worth carrying to another machine
+         [--out <file>]                  defaults to global scope only
+  import <file> [--dry-run]              bring an export in, provenance intact
   engagement [show|list|use <name>]      which client store this window writes to
              [purge <name> --yes]        delete one engagement's store entirely
 
@@ -561,6 +564,151 @@ function cmdDoctor() {
 
 // --- dispatch ---------------------------------------------------------------
 
+const EXPORT_SCOPES = ['global', 'repo', 'all'];
+
+/**
+ * Take the knowledge that is yours to take.
+ *
+ * Client work tends to live in its own environment, and when the engagement ends the
+ * environment goes with it. What should survive is what was never the client's: your
+ * conventions, the constraints an org imposes, the way you have learned to work.
+ * What must not survive is their architecture.
+ *
+ * So this defaults to global scope and nothing else. Exporting a client's notes is
+ * possible, because sometimes it is legitimately yours to move, but it takes saying
+ * so out loud rather than forgetting a flag.
+ *
+ * `captured_sha` is deliberately dropped. It names a commit that does not exist
+ * anywhere else, and a staleness signal that cannot be checked is worse than none:
+ * it would either read as current forever or claim the history was rewritten.
+ */
+function cmdExport(opts) {
+  const scope = opts.scope === true ? 'global' : (opts.scope ?? 'global');
+  if (!EXPORT_SCOPES.includes(scope)) {
+    return {
+      ok: false,
+      error: `scope must be one of ${EXPORT_SCOPES.join('|')}`,
+      text: `--scope must be one of ${EXPORT_SCOPES.join(', ')}. Default is global.`,
+    };
+  }
+
+  const all = listNotes().filter((n) => !n.__error && n.id);
+  const active = opts['include-archived'] ? all : all.filter((n) => !n.archived);
+  const picked = active.filter((n) => {
+    const s = n.scope || (n.repos?.length ? 'repo' : 'global');
+    return scope === 'all' || s === scope;
+  });
+
+  const nodes = picked.map((n) => ({
+    id: n.id,
+    type: n.type,
+    title: n.title,
+    body: n.body,
+    scope: n.scope || (n.repos?.length ? 'repo' : 'global'),
+    repos: n.repos ?? [],
+    confidence: n.confidence ?? 'observed',
+    supersedes: n.supersedes ?? null,
+    edges: n.edges ?? [],
+    source: n.source ?? 'manual',
+  }));
+
+  const payload = `${JSON.stringify({ nodes }, null, 2)}\n`;
+  if (typeof opts.out === 'string') {
+    atomicWrite(opts.out, payload);
+    return {
+      ok: true,
+      exported: nodes.length,
+      scope,
+      out: opts.out,
+      text: `Exported ${nodes.length} ${scope}-scope note${nodes.length === 1 ? '' : 's'} to ${opts.out}.`,
+    };
+  }
+  // Straight to stdout so it pipes, with the count on stderr where it will not
+  // corrupt the document.
+  process.stderr.write(`${nodes.length} ${scope}-scope notes\n`);
+  return { ok: true, exported: nodes.length, scope, nodes, text: payload.trimEnd() };
+}
+
+/**
+ * Bring exported knowledge into this environment.
+ *
+ * Separate from `write` because `write` stamps the current repository and commit onto
+ * whatever it is given, which is right for capture and wrong for this: it would
+ * relabel another environment's knowledge as having been observed here.
+ */
+function cmdImport(opts) {
+  const file = opts._[0] ?? opts.from;
+  if (!file || file === true || (file !== '-' && !existsSync(file))) {
+    return {
+      ok: false,
+      error: 'import requires a file, or - to read stdin',
+      text: 'Usage: agent-memory import <file>   (or - to read stdin)',
+    };
+  }
+
+  let incoming;
+  try {
+    incoming = readNodesFrom(file);
+  } catch (err) {
+    return { ok: false, error: `unreadable JSON: ${err.message}`, text: `Unreadable JSON: ${err.message}` };
+  }
+
+  const db = openDb();
+  const existing = new Set(db.prepare('SELECT id FROM nodes').all().map((r) => r.id));
+
+  if (opts['dry-run']) {
+    db.close();
+    const lines = incoming.map(
+      (n) => `${existing.has(n.id) ? 'would update' : 'would create'} ${n.id} [${n.type}]`,
+    );
+    return {
+      ok: true,
+      dryRun: true,
+      count: incoming.length,
+      text: [...lines, '', 'Nothing written. Re-run without --dry-run to apply.'].join('\n'),
+    };
+  }
+
+  const written = [];
+  const failed = [];
+  const warnings = [];
+  for (const raw of incoming) {
+    // Nothing from this environment is stamped on: no repo, no commit. An imported
+    // note claims only what it claimed where it was written.
+    // Stamped `import`, not the source it carried. How it was captured describes an
+    // environment that no longer exists; here, the honest answer to where this came
+    // from is that someone brought it in, and an audit should be able to see which.
+    const node = { ...raw, source: 'import' };
+    delete node.captured_sha;
+    try {
+      const res = writeNote(node);
+      written.push({ id: res.node.id, type: res.node.type, created: res.created });
+      if (res.findings.length) {
+        warnings.push(
+          `${res.node.id}: redacted ${res.findings.map((f) => `${f.count}x ${f.kind}`).join(', ')}`,
+        );
+      }
+    } catch (err) {
+      failed.push({ id: raw?.id ?? null, errors: err.errors ?? [err.message] });
+    }
+  }
+
+  reindex(db);
+  db.close();
+
+  return {
+    ok: failed.length === 0,
+    imported: written.length,
+    failed,
+    warnings,
+    text: [
+      ...written.map((w) => `${w.created ? 'created' : 'updated'} ${w.id} [${w.type}]`),
+      ...warnings.map((w) => `warning: ${w}`),
+      ...failed.map((f) => `failed ${f.id}: ${f.errors.join('; ')}`),
+    ].join('\n'),
+  };
+}
+
 /**
  * Show, switch and purge engagements.
  *
@@ -721,6 +869,8 @@ const COMMANDS = {
   compact: cmdCompact,
   doctor: cmdDoctor,
   engagement: cmdEngagement,
+  export: cmdExport,
+  import: cmdImport,
 };
 
 function main(argv) {
