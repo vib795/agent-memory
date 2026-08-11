@@ -1,13 +1,80 @@
 import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, parse as parsePath } from 'node:path';
 import { homedir } from 'node:os';
 import { atomicWrite } from './atomic.js';
 
 // The store lives outside every repository on purpose. That is what makes a note
 // written in one window readable from a window opened on a different project.
-export const STORE_ROOT =
+export const STORE_BASE =
   process.env.AGENT_MEMORY_HOME ||
   join(process.env.USERPROFILE || homedir(), '.agents', 'memory');
+
+export const DEFAULT_ENGAGEMENT = 'default';
+
+/** Where the pointer to the active engagement lives, outside every engagement. */
+export const ENGAGEMENT_POINTER = join(STORE_BASE, '.engagement');
+
+/** Engagement names become directory names, so they have to be safe as one. */
+export const ENGAGEMENT_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/** The file a client tree carries to pin itself to an engagement. */
+export const ENGAGEMENT_MARKER = '.agent-memory-engagement';
+
+/**
+ * Which engagement this process is working in, and how that was decided.
+ *
+ * A consultant runs several clients through one machine, and knowledge from one is
+ * not the next one's to see. The boundary is a separate store per engagement rather
+ * than a column to filter on, because filtering has to be remembered at every read
+ * and there are fourteen of them; two were already missed. A separate directory
+ * cannot be forgotten, and purging one is a directory removal that can be shown to
+ * have happened.
+ *
+ * The marker file is what makes this survive real use: drop one at the root of a
+ * client's tree and every repository beneath it is in that engagement, with nothing
+ * to remember when switching windows.
+ */
+export function resolveEngagement(cwd = process.cwd()) {
+  const env = process.env.AGENT_MEMORY_ENGAGEMENT?.trim();
+  if (env) return { name: env, source: 'AGENT_MEMORY_ENGAGEMENT' };
+
+  let dir = cwd;
+  for (;;) {
+    const marker = join(dir, ENGAGEMENT_MARKER);
+    if (existsSync(marker)) {
+      try {
+        const name = readFileSync(marker, 'utf8').trim().split('\n')[0].trim();
+        if (name) return { name, source: marker };
+      } catch {
+        // An unreadable marker is not a reason to fall back silently to another
+        // client's store. Treat it as unset and let the pointer or default decide.
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir || dir === parsePath(dir).root) break;
+    dir = parent;
+  }
+
+  if (existsSync(ENGAGEMENT_POINTER)) {
+    try {
+      const name = readFileSync(ENGAGEMENT_POINTER, 'utf8').trim();
+      if (name) return { name, source: ENGAGEMENT_POINTER };
+    } catch {
+      /* fall through to the default */
+    }
+  }
+  return { name: DEFAULT_ENGAGEMENT, source: 'default' };
+}
+
+/** The store directory for an engagement. The default one is the base itself. */
+export function engagementRoot(name) {
+  return name === DEFAULT_ENGAGEMENT ? STORE_BASE : join(STORE_BASE, 'engagements', name);
+}
+
+export const ENGAGEMENT = resolveEngagement();
+
+// Resolved once per process, like everything else here. One process, one answer.
+export const STORE_ROOT = engagementRoot(ENGAGEMENT.name);
 
 export const NOTE_TYPES = ['system', 'decision', 'convention', 'constraint'];
 
