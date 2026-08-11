@@ -162,6 +162,17 @@ exactly what would go.
 Everything already captured stays in `default`, at the same path as before. Nothing
 migrates and nothing changes until you create a second engagement.
 
+**Two things sit outside the boundary, deliberately.** Skill installation is shared,
+because every engagement reads the same three skill files and registering them per
+engagement would leave the description stale after a switch. Handoff files are shared
+too — they live in `~/.agents/handoffs`, not in a store — so `purge` does not remove
+them and says so every time rather than letting "the store is gone" be mistaken for
+"their context is gone".
+
+Most people need none of this. If each client already gives you a separate machine,
+that boundary is stronger than anything here, and the default engagement is all you
+will ever touch.
+
 ## CLI
 
 ```
