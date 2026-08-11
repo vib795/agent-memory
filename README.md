@@ -16,7 +16,7 @@ Three user-level Agent Skills over one local store:
 | Skill | What it does |
 |---|---|
 | `/handoff` | Writes a portable working-state file so another window can pick up this thread |
-| `/remember` | Captures durable knowledge into a cross-repo graph |
+| `/remember` | Captures durable knowledge into a cross-repo graph — and fires on its own when a juncture passes |
 | `/recall` | Answers from that graph before deriving anything again |
 
 **New here? Read the [HOW-TO](HOWTO.md)** — install, first five minutes, and the
@@ -78,6 +78,14 @@ recursive CTE *is* the graph engine, and `UNION` plus a depth bound is what keep
 - **Staleness is visible at the moment of use.** Every note records the repo HEAD it
   was captured at. On recall, `get` prints `captured 47 commits ago — verify before
   trusting`. A note that quietly rots is worse than no note.
+- **An empty graph says so.** Staleness cannot tell you a repo has nothing in it —
+  a repo nobody captured in has no stale notes either, so it reads as fully covered.
+  `tree` and `doctor` print `47 commits since anything was captured here` instead.
+  Silence has to mean covered, never empty.
+- **Capture does not wait to be asked.** The agent invokes `/remember` itself when a
+  decision settles, a constraint surfaces or a root cause is found, and says so in one
+  line. Judged by the model in the turn where the context still exists — never on a
+  timer or a tool count, because volume is what makes a graph useless.
 - **Redaction is fail-closed.** Keys, tokens, connection strings, private keys,
   session cookies, internal hosts and foreign email addresses are replaced before any
   byte reaches disk — not to a note, not to a temp file, not to the index.
@@ -336,7 +344,21 @@ Mid-session, when something worth keeping has been established:
 ```
 
 Bare, it selects the durable knowledge itself. With an argument, it writes that and
-nothing else. Either way it makes one terminal call, and `write` reports each id:
+nothing else.
+
+You will also see it fire without being asked, when a decision settles, a constraint
+surfaces, a root cause is found or a convention is agreed. It reports one line at the
+end of whatever it was already answering and carries on:
+
+```
+captured 2 notes [decision, constraint]
+```
+
+That costs nothing — a request is charged per prompt, not per tool call, so capture
+inside a turn you already paid for is free. Only typing `/remember` yourself spends
+one.
+
+Either way it makes one terminal call, and `write` reports each id:
 
 ```
 created auth-service [system]

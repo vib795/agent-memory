@@ -170,6 +170,21 @@ You can also point it at something specific:
 **Don't bother remembering** anything the code already says. If someone can find it by
 opening a file, it does not need a note. Notes are for what lives in people's heads.
 
+**You will also see it happen without you asking.** When a decision settles or a
+constraint turns up mid-conversation, the assistant writes it down and tells you in
+one line:
+
+```
+captured 2 notes [decision, constraint]
+```
+
+Then it carries on with whatever you were actually asking about. This is on purpose:
+the fact worth keeping is usually the one nobody stops to write down. It costs you
+nothing — your allowance is charged per message you send, not per thing the assistant
+does while answering — and you can see everything it captured with `/recall` or
+`agent-memory tree`. If it ever writes down something you did not want, the notes are
+plain markdown files you can edit or delete.
+
 ### `/handoff` — for moving work between windows
 
 This one is not a chat summary. Summaries read nicely and still leave the next
