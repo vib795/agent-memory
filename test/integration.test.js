@@ -889,6 +889,82 @@ test('write reads stdin with --from-json -, so the skills need no temp file', ()
   }
 });
 
+test('one engagement cannot read another, on any retrieval path', () => {
+  // A consultant runs several clients through one machine. This is the boundary that
+  // keeps one client's architecture out of another client's session, so it is tested
+  // by trying to cross it on every path a note can be reached by, not by inspection.
+  const base = mkdtempSync(join(tmpdir(), 'agent-memory-eng-'));
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const run = (engagement, args, input) =>
+    spawnSync(process.execPath, [cli, ...args], {
+      env: {
+        ...process.env,
+        AGENT_MEMORY_HOME: base,
+        ...(engagement ? { AGENT_MEMORY_ENGAGEMENT: engagement } : {}),
+      },
+      input,
+      encoding: 'utf8',
+    });
+
+  try {
+    const note = (id, title) =>
+      JSON.stringify({
+        nodes: [{ id, type: 'constraint', title, body: 'Client detail.', repos: ['a-repo'] }],
+      });
+
+    assert.equal(run('alpha', ['write', '--from-json', '-'], note('alpha-only', 'Alpha IAM layout')).status, 0);
+    assert.equal(run('beta', ['write', '--from-json', '-'], note('beta-only', 'Beta build order')).status, 0);
+
+    // Full text is the path that was unscoped before engagements existed.
+    const search = run('beta', ['search', 'IAM layout']);
+    assert.doesNotMatch(search.stdout, /alpha-only/, 'search must not cross the boundary');
+
+    // Knowing the exact id must not help either: absent, not merely filtered out.
+    const got = run('beta', ['get', 'alpha-only']);
+    assert.notEqual(got.status, 0);
+    assert.match(got.stdout + got.stderr, /No note with id/);
+
+    const tree = run('beta', ['tree', '--repo']);
+    assert.match(tree.stdout, /beta-only/);
+    assert.doesNotMatch(tree.stdout, /alpha-only/);
+
+    // And the boundary is symmetric, not a one-way filter.
+    assert.doesNotMatch(run('alpha', ['tree', '--repo']).stdout, /beta-only/);
+
+    // A marker file pins a whole tree, including from a subdirectory of it.
+    const clientTree = mkdtempSync(join(tmpdir(), 'agent-memory-client-'));
+    writeFileSync(join(clientTree, '.agent-memory-engagement'), 'alpha\n', 'utf8');
+    const nested = join(clientTree, 'services', 'api');
+    mkdirSync(nested, { recursive: true });
+    const shown = spawnSync(process.execPath, [cli, 'engagement', 'show'], {
+      cwd: nested,
+      env: { ...process.env, AGENT_MEMORY_HOME: base },
+      encoding: 'utf8',
+    });
+    assert.match(shown.stdout, /engagement: alpha/, 'a marker pins every repo beneath it');
+    rmSync(clientTree, { recursive: true, force: true });
+
+    // Purge is destructive and irreversible, so it must refuse a bare invocation and
+    // say what would go.
+    const refused = run(null, ['engagement', 'purge', 'beta']);
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stdout + refused.stderr, /--yes/);
+    assert.ok(existsSync(join(base, 'engagements', 'beta')), 'nothing removed without --yes');
+
+    const purged = run(null, ['engagement', 'purge', 'beta', '--yes']);
+    assert.equal(purged.status, 0);
+    assert.ok(!existsSync(join(base, 'engagements', 'beta')), 'the store is actually gone');
+
+    // Purging one client must not touch another's notes.
+    assert.match(run('alpha', ['tree', '--repo']).stdout, /alpha-only/);
+
+    // The default engagement holds the pre-engagement store and cannot be purged.
+    assert.notEqual(run(null, ['engagement', 'purge', 'default', '--yes']).status, 0);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 // --- uninstall ---------------------------------------------------------------------
 
 test('uninstall removes our links and prompt files, spares foreign ones, keeps notes', () => {

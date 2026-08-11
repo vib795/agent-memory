@@ -1,7 +1,10 @@
 #!/usr/bin/env node
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { loadConfig, saveConfig, paths, NOTE_TYPES } from './config.js';
+import {
+  loadConfig, saveConfig, paths, NOTE_TYPES, ENGAGEMENT, ENGAGEMENT_RE, ENGAGEMENT_POINTER,
+  ENGAGEMENT_MARKER, DEFAULT_ENGAGEMENT, STORE_BASE, engagementRoot,
+} from './config.js';
 import { ensureStore, writeNote, normalizeTitle, listNotes } from './store.js';
 import {
   openDb, reindex, searchNodes, getNodeRow, markAccessed, nodeCount, hasFts,
@@ -13,6 +16,7 @@ import { staleness, currentRepo, reviewCandidates, captureGap } from './stalenes
 import { setup as runSetup, unlinkSkills, danglingSkillLinks, SKILLS } from './setup.js';
 import { detectTargets, installableTargets } from './targets.js';
 import { join } from 'node:path';
+import { atomicWrite } from './atomic.js';
 
 /**
  * One process, one answer.
@@ -82,8 +86,11 @@ const USAGE = `agent-memory — durable cross-repo knowledge for coding agents
         [--source <name>] [--repo <name>]
   compact                                dedup, decay, reindex, regenerate
   doctor                                 preflight and health report
+  engagement [show|list|use <name>]      which client store this window writes to
+             [purge <name> --yes]        delete one engagement's store entirely
 
 Add --json to any command for machine-readable output.
+Engagement: ${ENGAGEMENT.name} (${ENGAGEMENT.source})
 Store: ${paths.root}`;
 
 // --- commands ---------------------------------------------------------------
@@ -422,6 +429,10 @@ function cmdDoctor() {
   const checks = [];
   const add = (name, ok, detail) => checks.push({ name, ok, detail });
 
+  // First, because everything below it is a fact about one engagement's store and
+  // reading it against the wrong client is the mistake this is here to prevent.
+  add('engagement', true, `${ENGAGEMENT.name} (${ENGAGEMENT.source})`);
+
   add('node version', nodeVersionOk(), `${process.versions.node} (need >= ${MIN_NODE.join('.')})`);
   if (!nodeVersionOk()) {
     return {
@@ -550,6 +561,154 @@ function cmdDoctor() {
 
 // --- dispatch ---------------------------------------------------------------
 
+/**
+ * Show, switch and purge engagements.
+ *
+ * Each engagement is a whole store on disk, so switching is a path change and
+ * purging is a directory removal. Nothing here filters anything: the isolation is
+ * structural, and a subcommand that got it wrong could not leak across the boundary
+ * even if it tried.
+ */
+function cmdEngagement(opts) {
+  const sub = opts._[0] ?? 'show';
+
+  if (sub === 'show') {
+    return {
+      ok: true,
+      engagement: ENGAGEMENT.name,
+      source: ENGAGEMENT.source,
+      store: paths.root,
+      text: [
+        `engagement: ${ENGAGEMENT.name}`,
+        `decided by: ${ENGAGEMENT.source}`,
+        `store:      ${paths.root}`,
+      ].join('\n'),
+    };
+  }
+
+  if (sub === 'list') {
+    const found = listEngagements();
+    return {
+      ok: true,
+      engagements: found,
+      text: found
+        .map((e) => `${e.name === ENGAGEMENT.name ? '*' : ' '} ${e.name.padEnd(24)} ${e.notes} notes`)
+        .join('\n'),
+    };
+  }
+
+  if (sub === 'use') {
+    const name = opts._[1];
+    if (!name || !ENGAGEMENT_RE.test(name)) return badEngagementName(name);
+    mkdirSync(STORE_BASE, { recursive: true });
+    atomicWrite(ENGAGEMENT_POINTER, `${name}\n`);
+    return {
+      ok: true,
+      engagement: name,
+      store: engagementRoot(name),
+      text: [
+        `engagement: ${name}`,
+        `store:      ${engagementRoot(name)}`,
+        '',
+        'This is the fallback for every window on this machine. To pin one client tree',
+        `instead, put the name in a ${ENGAGEMENT_MARKER} file at the top of it.`,
+      ].join('\n'),
+    };
+  }
+
+  if (sub === 'purge') {
+    const name = opts._[1];
+    if (!name || !ENGAGEMENT_RE.test(name)) return badEngagementName(name);
+    if (name === DEFAULT_ENGAGEMENT) {
+      return {
+        ok: false,
+        error: 'the default engagement cannot be purged',
+        text: 'The default engagement cannot be purged. Delete individual notes instead.',
+      };
+    }
+    const dir = engagementRoot(name);
+    if (!existsSync(dir)) {
+      return { ok: false, error: `no engagement named ${name}`, text: `No engagement named ${name}.` };
+    }
+    const notes = countNotes(dir);
+    if (!opts.yes) {
+      // Deleting a client's captured knowledge is not something to do because a name
+      // was typed. Say exactly what goes, and make the caller ask again.
+      return {
+        ok: false,
+        error: 'purge requires --yes',
+        engagement: name,
+        notes,
+        text: [
+          `This deletes ${notes} note${notes === 1 ? '' : 's'} and the whole store at:`,
+          `  ${dir}`,
+          '',
+          'Nothing else is touched, and this cannot be undone. To go ahead:',
+          `  agent-memory engagement purge ${name} --yes`,
+        ].join('\n'),
+      };
+    }
+    rmSync(dir, { recursive: true, force: true });
+    return {
+      ok: true,
+      engagement: name,
+      notes,
+      removed: dir,
+      // Stated as a fact someone can check, because "we deleted it" is a claim that
+      // eventually has to be evidenced rather than asserted.
+      text: [
+        `Purged engagement ${name}: ${notes} note${notes === 1 ? '' : 's'} removed.`,
+        `${dir} no longer exists.`,
+      ].join('\n'),
+    };
+  }
+
+  return {
+    ok: false,
+    error: `unknown subcommand ${sub}`,
+    text: 'Usage: agent-memory engagement [show|list|use <name>|purge <name> --yes]',
+  };
+}
+
+function badEngagementName(name) {
+  return {
+    ok: false,
+    error: 'invalid engagement name',
+    text: [
+      name ? `"${name}" is not a usable engagement name.` : 'An engagement name is required.',
+      'Names become directory names: lower case, digits and hyphens, up to 64 characters.',
+    ].join('\n'),
+  };
+}
+
+/** Markdown files under a store, counted without opening its index. */
+function countNotes(root) {
+  const dir = join(root, 'notes');
+  if (!existsSync(dir)) return 0;
+  let n = 0;
+  const walk = (d) => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(join(d, entry.name));
+      else if (entry.name.endsWith('.md')) n += 1;
+    }
+  };
+  walk(dir);
+  return n;
+}
+
+function listEngagements() {
+  const out = [{ name: DEFAULT_ENGAGEMENT, notes: countNotes(engagementRoot(DEFAULT_ENGAGEMENT)) }];
+  const dir = join(STORE_BASE, 'engagements');
+  if (existsSync(dir)) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) out.push({ name: entry.name, notes: countNotes(join(dir, entry.name)) });
+    }
+  }
+  // The active one may not exist on disk yet, and omitting it would read as absent.
+  if (!out.some((e) => e.name === ENGAGEMENT.name)) out.push({ name: ENGAGEMENT.name, notes: 0 });
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 const COMMANDS = {
   setup: cmdSetup,
   uninstall: cmdUninstall,
@@ -561,6 +720,7 @@ const COMMANDS = {
   write: cmdWrite,
   compact: cmdCompact,
   doctor: cmdDoctor,
+  engagement: cmdEngagement,
 };
 
 function main(argv) {

@@ -94,6 +94,44 @@ recursive CTE *is* the graph engine, and `UNION` plus a depth bound is what keep
 - **Constraints are never dropped.** At any cap, in either tier. A constraint is what
   stops an agent burning a retry loop on an approach that was never going to ship.
 
+## Engagements
+
+If you work for more than one client on one machine, knowledge from one of them is
+not the next one's to see. An engagement is a **separate store**, and switching is a
+path change rather than a filter:
+
+```bash
+agent-memory engagement                    # which one is active, and why
+agent-memory engagement list               # all of them, with note counts
+agent-memory engagement use acme           # the fallback for every window
+agent-memory engagement purge acme --yes   # delete that client's store entirely
+```
+
+Pin a client's whole tree instead of remembering to switch. One file at the top of
+it, and every repository beneath is in that engagement:
+
+```bash
+echo acme > ~/clients/acme/.agent-memory-engagement
+```
+
+Resolution order is `AGENT_MEMORY_ENGAGEMENT`, then the nearest marker file walking
+up from where you are, then the machine-wide pointer, then `default`. `doctor` and
+`engagement` both print which one decided it, because the failure worth preventing is
+believing you are in one client's store while writing to another.
+
+**The isolation is structural, not a filter.** Each engagement is its own directory,
+its own markdown and its own index, so `search`, `get` and `tree` cannot reach across
+even by exact id — there is no query to forget. Filtering would have to be remembered
+at fourteen separate read paths, and two of them were already missed before this
+existed.
+
+That also makes removal something you can evidence rather than assert: `purge` deletes
+a directory and reports the count, and refuses without `--yes` after telling you
+exactly what would go.
+
+Everything already captured stays in `default`, at the same path as before. Nothing
+migrates and nothing changes until you create a second engagement.
+
 ## CLI
 
 ```
