@@ -1109,6 +1109,18 @@ test('the extraction rules are identical in both skills', () => {
   assert.equal(block('../skills/remember/SKILL.md'), block('../skills/handoff/SKILL.md'));
 });
 
+test('every manifest that carries a version agrees with package.json', () => {
+  // These drifted silently for fifteen releases: plugin.json sat at 0.3.1 and
+  // marketplace.json at 0.1.5 while the package shipped 0.5.0, because nothing read
+  // them on the way out. A version that only a human remembers to bump is a version
+  // that is wrong, so the check belongs here rather than in a release checklist.
+  const read = (p) => JSON.parse(readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8'));
+  const version = read('../package.json').version;
+
+  assert.equal(read('../.claude-plugin/plugin.json').version, version, 'plugin.json');
+  assert.equal(read('../.claude-plugin/marketplace.json').plugins[0].version, version, 'marketplace.json');
+});
+
 test('export removes personal identifiers and says what it removed', () => {
   // Scope decides whose knowledge travels. This decides whether the file can be
   // handed to a person. They are different questions and both have to be answered
@@ -1165,6 +1177,11 @@ test('export removes personal identifiers and says what it removed', () => {
     assert.equal(doc.redaction.scanned, 2);
     assert.equal(doc.redaction.exported, 1);
     assert.deepEqual(doc.redaction.withheld.map((w) => w.id), ['oncall-roster']);
+    assert.deepEqual(
+      doc.redaction.redactions,
+      [{ kind: 'phone', count: 1 }],
+      'the roster is withheld, so its eight numbers are not counted as redacted',
+    );
     assert.match(doc.redaction.semanticReviewRequired, /Names/);
     // stderr carries the receipt so a person piping the document still sees it.
     assert.match(out.stderr, /rule set: pii\/v1/);

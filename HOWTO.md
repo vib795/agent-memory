@@ -304,7 +304,7 @@ Everything is in one folder:
   memory/notes/     your notes, as plain markdown files
 ```
 
-Three things worth knowing:
+Five things worth knowing:
 
 **Nothing leaves your machine.** No server, no account, no telemetry, no background
 process, nothing to get approved by IT. It is a small program that writes text files.
@@ -321,6 +321,13 @@ nothing to be locked into.
 
 **Nothing is ever deleted.** Notes that get replaced or go stale move to an `archive`
 folder rather than disappearing.
+
+**Sharing is a separate decision.** If you export your notes to hand to a colleague,
+personal details — phone numbers, card numbers, national IDs, email addresses — are
+stripped on the way out, and the file tells you what was removed. A note that is
+mostly contact details is left out of the file entirely rather than shipped with holes
+in it. Names and addresses written in ordinary prose are not something a pattern can
+find, so ask your assistant to read the file over before you send it.
 
 ---
 

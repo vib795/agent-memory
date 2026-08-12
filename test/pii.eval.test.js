@@ -136,6 +136,10 @@ test('the receipt names the rule set, the counts, and its own limits', () => {
   assert.equal(receipt.ruleSet, RULE_SET);
   assert.equal(receipt.exported, 1);
   assert.deepEqual(receipt.withheld, [{ id: 'b', reason: '9 identifiers', kinds: ['phone'] }]);
+  // `redacted` describes the file the reader is holding. The withheld note's nine
+  // phone numbers are reported under `withheld`, never folded into this total, or
+  // the receipt would claim work it did not do on content it did not ship.
+  assert.deepEqual(receipt.redactions, [{ kind: 'email', count: 2 }]);
   // The claim a receipt must never make is completeness.
   assert.match(receipt.semanticReviewRequired, /Names/);
 });

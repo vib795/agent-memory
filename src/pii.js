@@ -228,10 +228,15 @@ export function buildReceipt(results, { scanned }) {
   const counts = new Map();
   const withheld = [];
   for (const r of results) {
-    for (const f of r.findings) counts.set(f.kind, (counts.get(f.kind) || 0) + f.count);
     if (r.withheld) {
+      // Counted under `withheld`, not under `redacted`. Nothing in a withheld note
+      // was redacted, because the note is not in the file; folding its findings into
+      // the redaction totals would overstate what the reader is holding, and a
+      // governance artifact that overstates is worth less than none.
       withheld.push({ id: r.id, reason: r.reason, kinds: r.findings.map((f) => f.kind) });
+      continue;
     }
+    for (const f of r.findings) counts.set(f.kind, (counts.get(f.kind) || 0) + f.count);
   }
   const redactions = [...counts.entries()]
     .map(([kind, count]) => ({ kind, count }))
