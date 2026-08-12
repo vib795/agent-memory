@@ -75,7 +75,7 @@ function git(args, cwd = process.cwd()) {
 const USAGE = `agent-memory — durable cross-repo knowledge for coding agents
 
   setup                                  link all three skills, build the store
-                                         (runs automatically on npm install)
+                                         (run this once, by hand, after install)
   uninstall                              remove the skill links; keeps every note
   init [--skills "<p1>,<p2>"]            create the store; register skill files
   index                                  rebuild index.db from notes/

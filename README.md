@@ -23,6 +23,10 @@ Three user-level Agent Skills over one local store:
 per-tool notes for Claude Code, Codex and Copilot, written for people who do not
 want to read the rest of this file.
 
+**Want to know how it works?** [ARCHITECTURE.md](ARCHITECTURE.md) explains the
+design and why it is that way — the source-of-truth split, the write and read
+paths, the tiered context cost, and the invariants that hold it together.
+
 ## Why this exists
 
 Moving context between windows today means copy-pasting the chat, retyping from
@@ -499,7 +503,7 @@ is generated state, and the committed value is only a placeholder.
 
 Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old.
 
-Run `npm test` for the suite (88 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (91 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 

@@ -15,7 +15,7 @@ export const GENERATED_MARKER =
 
 /** Split a leading `---` frontmatter block from the body. */
 function splitFrontmatter(text) {
-  const src = String(text).replace(/^﻿/, '').replace(/\r\n/g, '\n');
+  const src = String(text).replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   if (!src.startsWith('---')) return { head: '', body: src.trim() };
   const end = src.indexOf('\n---', 3);
   if (end === -1) return { head: '', body: src.trim() };
