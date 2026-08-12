@@ -472,7 +472,7 @@ is generated state, and the committed value is only a placeholder.
 
 Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old.
 
-Run `npm test` for the suite (87 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (88 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 
