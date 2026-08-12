@@ -186,7 +186,7 @@ jobs:
   # the repository and install that directory. For one release the documented
   # command was `npm install -g <git-url>` instead, which does not work at all: npm
   # links the package into ~/.npm/_cacache/tmp/git-clone*, deletes that directory,
-  # and postinstall dies with "Cannot find module". Nothing here noticed, because
+  # and leaves the global install pointing at nothing. Nothing here noticed, because
   # the job above only ever installs the packed tarball. A documented install path
   # that nothing exercises is a claim, not a feature — so exercise it.
   clone-install:
@@ -228,12 +228,12 @@ jobs:
           # tests a path that cannot exist.
           root="$(npm root -g | tr -d '\r' | tr '\\' '/')"
           pkg="$root/@vib795/agent-memory"
-          for f in package.json src/cli.js scripts/postinstall.js skills/recall/SKILL.md; do
+          for f in package.json src/cli.js skills/recall/SKILL.md; do
             test -f "$pkg/$f" || { echo "::error::$f is missing from the install at $pkg"; exit 1; }
           done
 
-          # npm gates postinstall behind allow-scripts, so setup is the documented
-          # second command here exactly as it is for a registry install.
+          # The package ships no install hook, so setup is the documented second
+          # command here exactly as it is for a registry install.
           agent-memory setup
           for s in handoff recall remember; do
             test -f "$AGENT_MEMORY_SKILLS_HOME/.agents/skills/$s/SKILL.md" \

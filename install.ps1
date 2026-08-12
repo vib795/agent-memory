@@ -3,13 +3,13 @@
   Installs agent-memory and all three skills from a checkout.
 
 .DESCRIPTION
-  `npm install -g .` does this on its own via the postinstall hook. This script
-  exists for two cases: installing straight from a clone without npm, and finishing
-  the job when a managed npm config sets ignore-scripts=true and silently skips it.
+  The package ships no install hook, on purpose: an install script that writes into
+  another tool's agent directory is the shape of a supply-chain agent hijack. Nothing
+  is linked until someone asks, and this script is that ask for a clone.
 
   The linking itself lives in src\setup.js, not here. That is deliberate: a PowerShell
   reimplementation could only be tested on Windows, and the machine this was written
-  on is not Windows. One implementation, three entry points, no drift.
+  on is not Windows. One implementation, no drift.
 
   Skills are linked into both agent directories:
     %USERPROFILE%\.agents\skills\<name>   -> read by GitHub Copilot in every window
