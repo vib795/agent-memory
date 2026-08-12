@@ -17,6 +17,7 @@ import { setup as runSetup, unlinkSkills, danglingSkillLinks, SKILLS } from './s
 import { detectTargets, installableTargets } from './targets.js';
 import { join, dirname } from 'node:path';
 import { atomicWrite } from './atomic.js';
+import { redactNodeForExport, buildReceipt, renderReceipt } from './pii.js';
 
 /**
  * One process, one answer.
@@ -581,6 +582,10 @@ const EXPORT_SCOPES = ['global', 'repo', 'all'];
  * `captured_sha` is deliberately dropped. It names a commit that does not exist
  * anywhere else, and a staleness signal that cannot be checked is worse than none:
  * it would either read as current forever or claim the history was rewritten.
+ *
+ * Personal identifiers are removed on the way out, and the export carries a receipt
+ * saying which rule set ran and what it took. Scope decides whose knowledge travels;
+ * the receipt decides whether it can be handed to a person.
  */
 function cmdExport(opts) {
   const scope = opts.scope === true ? 'global' : (opts.scope ?? 'global');
@@ -612,21 +617,42 @@ function cmdExport(opts) {
     source: n.source ?? 'manual',
   }));
 
-  const payload = `${JSON.stringify({ nodes }, null, 2)}\n`;
+  // Export is the only path by which the store leaves this machine, which makes it
+  // the only place disclosure control belongs. It is a different question from the
+  // one capture-time redaction answers, and src/pii.js says why at length.
+  const results = nodes.map((n) => ({ id: n.id, ...redactNodeForExport(n) }));
+  const clean = results.filter((r) => !r.withheld).map((r) => r.node);
+  const receipt = buildReceipt(results, { scanned: nodes.length });
+  const payload = `${JSON.stringify({ nodes: clean, redaction: receipt }, null, 2)}\n`;
+
   if (typeof opts.out === 'string') {
     atomicWrite(opts.out, payload);
     return {
       ok: true,
-      exported: nodes.length,
+      exported: clean.length,
+      withheld: receipt.withheld.length,
       scope,
       out: opts.out,
-      text: `Exported ${nodes.length} ${scope}-scope note${nodes.length === 1 ? '' : 's'} to ${opts.out}.`,
+      redaction: receipt,
+      text: [
+        `Exported ${clean.length} ${scope}-scope note${clean.length === 1 ? '' : 's'} to ${opts.out}.`,
+        ...renderReceipt(receipt),
+      ].join('\n'),
     };
   }
-  // Straight to stdout so it pipes, with the count on stderr where it will not
-  // corrupt the document.
-  process.stderr.write(`${nodes.length} ${scope}-scope notes\n`);
-  return { ok: true, exported: nodes.length, scope, nodes, text: payload.trimEnd() };
+  // Straight to stdout so it pipes, with the count and the receipt on stderr where
+  // they will not corrupt the document.
+  process.stderr.write(`${clean.length} ${scope}-scope notes\n`);
+  for (const line of renderReceipt(receipt)) process.stderr.write(`${line}\n`);
+  return {
+    ok: true,
+    exported: clean.length,
+    withheld: receipt.withheld.length,
+    scope,
+    nodes: clean,
+    redaction: receipt,
+    text: payload.trimEnd(),
+  };
 }
 
 /**

@@ -124,6 +124,89 @@ Two things are deliberately dropped on the way through:
 Importing the same file twice updates rather than duplicates, so re-running after a
 change is safe.
 
+### Sharing an export with another person
+
+Scope decides *whose* knowledge travels. It does not decide whether the file can be
+handed to a person, and those are separate questions. Every export is scanned for
+personal identifiers on the way out, and the file carries a receipt naming the rule
+set that ran and what it took.
+
+```
+$ agent-memory export --out carry.json
+Exported 41 global-scope notes to carry.json.
+rule set: pii/v1
+redacted: 6 phone, 2 payment-card, 1 ssn
+withheld: 1 note
+  oncall-roster — 8 identifiers (phone)
+
+Structured identifiers only. Have an agent review this file for names and
+identifying prose before sharing it outside your team.
+```
+
+Notes are **redacted in place**, so the knowledge survives and the identifier does
+not. A note that is *mostly* identifiers — a roster, a contact sheet — is withheld
+whole and named in the receipt, because a redacted skeleton is useless to the reader
+and still re-identifiable from the structure that remains.
+
+**Two layers, and the markers tell you which one acted.**
+
+| | Runs at | Asks | Marker |
+|---|---|---|---|
+| `src/redact.js` | capture | could this authenticate as someone? | `<redacted:kind>` |
+| `src/pii.js` | export | could this identify a person? | `[redacted:kind]` |
+
+They disagree about your own email address on purpose. Capture keeps it, because it
+is already public in every commit you have ever pushed. Export removes it, because it
+is not yours to hand to someone else alongside a hundred notes about how a client
+works.
+
+**What the deterministic layer does not catch.** Names, job titles, postal addresses
+and identifying prose have no shape to match on. They are language, and the honest
+place to judge them is the model already in the conversation — so the receipt says so
+instead of letting a pattern imply a completeness it does not have. Ask your agent to
+review the export before it leaves your team.
+
+## Evals and governance
+
+Disclosure control is a claim until it is measured, so it is measured on every run of
+`npm test`:
+
+```
+[pii/v1] recall by kind
+  email          2/2
+  ip-address     2/2
+  payment-card   3/3
+  phone          4/4
+  ssn            2/2
+[pii/v1] precision 15/15 on the negative corpus
+[pii/v1] 3 known gaps pass through by design: person name, postal address, bare internal identifier
+```
+
+The practices behind that number, which are the transferable part:
+
+- **Both error directions are costed, not just the obvious one.** A miss discloses one
+  identifier. A false hit shreds a sentence, and a tool that mangles ordinary prose
+  gets switched off, which discloses everything. Recall is held at 1.0 because no
+  number of leaked identifiers is acceptable; precision is held at 1.0 against a
+  corpus built to tempt each detector with what it most resembles — a git SHA for a
+  card, a four-part version for an address, a date for a phone number.
+- **Gaps are asserted as gaps.** `test/pii.eval.test.js` proves that names and
+  addresses pass through, so closing one has to be a deliberate act rather than a
+  silent change in what an old receipt meant.
+- **The eval is checked for teeth.** Removing the Luhn validation drops precision to
+  14/15 and fails the build. A green suite that cannot go red is decoration.
+- **Corpora are synthetic.** Reserved ranges only — RFC 5737 addresses, the card
+  networks' published test numbers — so the file that tests for leaks is not one.
+- **Rule sets are versioned.** A receipt means something only against the rules that
+  produced it, so `pii/v1` is stamped into every export and changing a detector
+  changes the name.
+
+For sharing outside your team: keep the receipt with the file, re-export rather than
+hand-editing a file you already sent, and treat `--scope all` as a decision with your
+name on it. What this is not: it is not encryption, access control, or a DLP product.
+It is one command that refuses to hand over identifiers, and it says exactly what it
+checked.
+
 ## Engagements
 
 If you work for more than one client on one machine, knowledge from one of them is
@@ -389,7 +472,7 @@ is generated state, and the committed value is only a placeholder.
 
 Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old.
 
-Run `npm test` for the suite (78 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (87 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 

@@ -1108,3 +1108,67 @@ test('the extraction rules are identical in both skills', () => {
   };
   assert.equal(block('../skills/remember/SKILL.md'), block('../skills/handoff/SKILL.md'));
 });
+
+test('export removes personal identifiers and says what it removed', () => {
+  // Scope decides whose knowledge travels. This decides whether the file can be
+  // handed to a person. They are different questions and both have to be answered
+  // before an export leaves the machine, so both are checked on the real command.
+  const home = mkdtempSync(join(tmpdir(), 'agent-memory-pii-'));
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const run = (args, input) =>
+    spawnSync(process.execPath, [cli, ...args], {
+      env: { ...process.env, AGENT_MEMORY_HOME: home },
+      input,
+      encoding: 'utf8',
+    });
+
+  try {
+    const seeded = run(['write', '--from-json', '-'], JSON.stringify({
+      nodes: [
+        {
+          id: 'release-approval', type: 'convention', scope: 'global', repos: [],
+          title: 'Releases need a second approver',
+          body: 'Ask the release lead. Escalate to ops@example.com, or 415-555-0142.',
+        },
+        {
+          id: 'oncall-roster', type: 'system', scope: 'global', repos: [],
+          title: 'On-call roster',
+          body: ['415-555-0101', '415-555-0102', '415-555-0103', '415-555-0104',
+            '415-555-0105', '415-555-0106', '415-555-0107', '415-555-0108'].join(', '),
+        },
+      ],
+    }));
+    assert.equal(seeded.status, 0);
+
+    const out = run(['export']);
+    assert.equal(out.status, 0);
+    const doc = JSON.parse(out.stdout);
+
+    const kept = doc.nodes.find((n) => n.id === 'release-approval');
+    assert.ok(kept, 'an ordinary note still travels');
+    assert.match(kept.body, /Ask the release lead/, 'the knowledge survives');
+    assert.doesNotMatch(kept.body, /ops@example\.com|415-555-0142/, 'the identifiers do not');
+    // Two layers ran, and the markers differ so you can tell which one acted:
+    // capture took the address on the way in, export took the number on the way out.
+    // A phone number is safe to store and not yours to hand to someone else.
+    assert.match(kept.body, /<redacted:email>/, 'capture-time redaction, angle brackets');
+    assert.match(kept.body, /\[redacted:phone\]/, 'export-time redaction, square brackets');
+
+    assert.ok(
+      !doc.nodes.some((n) => n.id === 'oncall-roster'),
+      'a roster is contact data wearing a note, and ships as neither',
+    );
+
+    // The receipt is the governance artifact: without it the file is of unknown
+    // provenance, and "we remove PII" stays a claim rather than a record.
+    assert.equal(doc.redaction.ruleSet, 'pii/v1');
+    assert.equal(doc.redaction.scanned, 2);
+    assert.equal(doc.redaction.exported, 1);
+    assert.deepEqual(doc.redaction.withheld.map((w) => w.id), ['oncall-roster']);
+    assert.match(doc.redaction.semanticReviewRequired, /Names/);
+    // stderr carries the receipt so a person piping the document still sees it.
+    assert.match(out.stderr, /rule set: pii\/v1/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
