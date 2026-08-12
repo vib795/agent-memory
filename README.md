@@ -207,6 +207,33 @@ name on it. What this is not: it is not encryption, access control, or a DLP pro
 It is one command that refuses to hand over identifiers, and it says exactly what it
 checked.
 
+### Independently scanned
+
+Public supply-chain scanners index every package published to npm, so this one is
+reviewed by people who owe it nothing. That is worth more than a clean claim from its
+author.
+
+[LPM Firewall](https://firewall.lpm.dev/npm/@vib795/agent-memory) currently reports
+**Passed — safe to install**, with no policy match and no flagged code. Its reading of
+the artefact — signed, provenance attached, zero dependencies, no install hooks — is a
+third-party check on what this README says about itself. Four low-signal patterns
+remain, and they are descriptive rather than policy: environment variables, scripts
+present, filesystem, high-entropy strings. That is what a CLI which reads
+`AGENT_MEMORY_HOME` and writes files in your home directory looks like from outside.
+
+**It did not start there.** Version 0.3.1 was flagged **Critical — AI Agent Control
+Hijack**, because `postinstall` wrote skill files into `~/.claude`, `~/.codex` and your
+editor's prompt folder. The finding was correct. An install script that grants an AI
+agent new instructions without the user asking is indistinguishable from an attack
+that does exactly that, and good intent is not observable to a scanner. The hook was
+removed in 0.4.0 rather than argued with, which is why `agent-memory setup` is a
+command you type.
+
+The 0.3.1 report is still public and still says Critical. Old version pages do not
+come down, and they should not: a supply-chain record that could be edited after the
+fact would be worth nothing. What a project can offer is the next version and the
+reason for it.
+
 ## Engagements
 
 If you work for more than one client on one machine, knowledge from one of them is
