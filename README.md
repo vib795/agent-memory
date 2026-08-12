@@ -279,10 +279,11 @@ npm install -g ./agent-memory
 agent-memory setup
 ```
 
-**Do not install from the git URL directly.** `npm install -g <git-url>` fails for
-this package: npm links the package into `~/.npm/_cacache/tmp/git-clone*`, a
-directory it then cleans, and `postinstall` dies with `Cannot find module` before it
-can run. Cloning first avoids npm's git handling entirely. Verified on npm 11.18.
+**Do not install from the git URL directly.** `npm install -g <git-url>` does not
+work for this package: npm resolves a git install through
+`~/.npm/_cacache/tmp/git-clone*` and then removes that directory, leaving the global
+install pointing at a path that no longer exists. Cloning first avoids npm's git
+handling entirely. Verified on npm 11.18.
 
 Every release is mirrored to **GitHub Packages**. Treat that as redundancy rather
 than a second front door: GitHub Packages requires authentication even for public
@@ -324,17 +325,16 @@ drift, and `compact` regenerates the routing digest into both.
 `agent-memory doctor` lists what it detected, so an install that appears to do
 nothing tells you whether your editor was missed or simply ignored the files.
 
-**Why it is not automatic.** There is a `postinstall` hook that does exactly this,
-but current npm refuses to run package install scripts unless you opt in per
-package, and prints only a warning when it skips them. Managed environments go
-further and set `ignore-scripts=true` globally. Rather than pretend, the second
-command is documented as part of the install. If you would rather have it automatic:
+**Why it is not automatic.** Installing the package writes nothing to your machine.
+There is no `postinstall` hook, and its absence is a security decision rather than an
+omission: an install script that writes into *other* tools' agent directories —
+`~/.claude`, `~/.codex`, your editor's prompt folder — is mechanically
+indistinguishable from a supply-chain attack that hijacks an AI agent, and
+supply-chain scanners classify it as exactly that. Installing this package and
+granting it your agents are two separate decisions, so they are two commands.
+`agent-memory setup` is the one that asks.
 
-```bash
-npm install -g --allow-scripts=@vib795/agent-memory @vib795/agent-memory
-```
-
-Either way `agent-memory doctor` tells you where you stand. It checks the files
+`agent-memory doctor` tells you where you stand. It checks the files
 rather than the tools, and names any agent it found that has no skills in it:
 
 ```
@@ -387,10 +387,9 @@ Note that `npm install -g .` from a clone *symlinks* rather than copies, so
 `skills/recall/SKILL.md` will show as modified. That is expected — the description
 is generated state, and the committed value is only a placeholder.
 
-Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old, and
-`postinstall` refuses rather than failing your install.
+Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old.
 
-Run `npm test` for the suite (74 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (78 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 

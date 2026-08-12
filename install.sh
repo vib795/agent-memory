@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Installs agent-memory and all three skills from a checkout, on macOS/Linux.
 #
-# `npm install -g .` does this on its own via the postinstall hook. This script
-# exists for two cases: installing straight from a clone without npm, and finishing
-# the job when a managed npm config sets ignore-scripts=true and silently skips it.
+# The package ships no install hook, on purpose: an install script that writes into
+# another tool's agent directory is the shape of a supply-chain agent hijack. Nothing
+# is linked until someone asks, and this script is that ask for a clone.
 #
 # The linking itself lives in src/setup.js, not here. One implementation, three entry
 # points, so this script and its PowerShell twin cannot drift from each other.

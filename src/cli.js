@@ -131,10 +131,10 @@ function cmdInit(opts) {
 /**
  * Link the skills into both agents and build the store.
  *
- * Runs automatically from npm postinstall, but exists as a command because managed
- * npm configurations often set `ignore-scripts=true`, which skips postinstall with
- * no warning. When that happens the recovery is one command rather than hunting for
- * a shell script inside a global node_modules directory.
+ * This is the only thing that writes into an agent's directory, and it only runs when
+ * a person types it. The package deliberately ships no install hook: writing into
+ * another tool's agent surface from an install script is the shape of a supply-chain
+ * agent hijack, whoever does it and for whatever reason.
  */
 function cmdSetup() {
   ensureStore();
@@ -496,10 +496,10 @@ function cmdDoctor() {
   );
 
   // Detection is not installation, and conflating them is how this tool reports
-  // healthy while doing nothing. npm gates postinstall scripts behind allow-scripts,
-  // and managed profiles set ignore-scripts=true; in both cases the CLI lands on PATH
-  // and every agent directory stays empty, while every other check here still passes.
-  // So verify the files, per agent, rather than trusting that setup ever ran.
+  // healthy while doing nothing. Installing the package does not install the skills;
+  // only `agent-memory setup` does, so the CLI routinely lands on PATH with every
+  // agent directory empty while every other check here still passes. Verify the
+  // files, per agent, rather than trusting that setup ever ran.
   const gaps = [];
   for (const t of installableTargets()) {
     const absent = SKILLS.filter((name) =>

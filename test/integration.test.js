@@ -610,9 +610,9 @@ test('a bare home still reaches Copilot through the shared ~/.agents/skills path
 
 test('doctor fails when an agent is detected but has no skills in it', () => {
   // The regression this guards is the one that makes every other check worthless:
-  // npm gates postinstall behind allow-scripts and managed profiles set
-  // ignore-scripts=true, so the CLI lands on PATH with nothing installed anywhere.
-  // Detection still succeeds, so doctor must check the files rather than the tools.
+  // installing the package installs no skills, by design, so the CLI routinely lands
+  // on PATH with nothing installed anywhere. Detection still succeeds, so doctor must
+  // check the files rather than the tools.
   const home = fakeHome({ copilot: true, claude: true });
   const store = mkdtempSync(join(tmpdir(), 'agent-memory-store-'));
   const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));

@@ -11,8 +11,8 @@ import { toPromptFile, isGenerated } from './promptfile.js';
 /**
  * Installation, in Node rather than in two shell scripts.
  *
- * This is the single implementation behind three entry points: `npm install` via
- * postinstall, `agent-memory setup`, and install.sh / install.ps1. Writing it once
+ * This is the single implementation behind both entry points: `agent-memory setup`,
+ * and install.sh / install.ps1 which are thin wrappers over it. Writing it once
  * matters because the machine that has to run it is a Windows desktop this was never
  * developed on, and a PowerShell copy of this logic would drift silently.
  *
@@ -207,8 +207,8 @@ export function setup({ compactFn } = {}) {
   const existing = (loadConfig().skillPaths || []).filter((p) => existsSync(p));
   saveConfig({ skillPaths: [...new Set([...existing, ...skillPaths])] });
 
-  // compact is passed in so this module does not pull the database, and the whole
-  // npm postinstall path with it, into memory just to make some symlinks.
+  // compact is passed in so this module does not pull the database into memory just
+  // to make some symlinks.
   const result = compactFn ? compactFn() : null;
   return {
     targets,
