@@ -1114,11 +1114,19 @@ test('every manifest that carries a version agrees with package.json', () => {
   // marketplace.json at 0.1.5 while the package shipped 0.5.0, because nothing read
   // them on the way out. A version that only a human remembers to bump is a version
   // that is wrong, so the check belongs here rather than in a release checklist.
+  //
+  // package-lock.json was the one this check missed, and it sat at 0.1.4 through the
+  // eighteen releases after it for exactly the same reason. It carries the version
+  // twice, so both are asserted; npm writes them together but only one is obvious.
   const read = (p) => JSON.parse(readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8'));
   const version = read('../package.json').version;
 
   assert.equal(read('../.claude-plugin/plugin.json').version, version, 'plugin.json');
   assert.equal(read('../.claude-plugin/marketplace.json').plugins[0].version, version, 'marketplace.json');
+
+  const lock = read('../package-lock.json');
+  assert.equal(lock.version, version, 'package-lock.json');
+  assert.equal(lock.packages[''].version, version, 'package-lock.json packages[""]');
 });
 
 test('export removes personal identifiers and says what it removed', () => {
