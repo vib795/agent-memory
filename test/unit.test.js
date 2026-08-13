@@ -13,6 +13,7 @@ process.on('exit', () => rmSync(ROOT, { recursive: true, force: true }));
 const { validateNode, ValidationError } = await import('../src/schema.js');
 const { redact, redactNode } = await import('../src/redact.js');
 const store = await import('../src/store.js');
+const { toPromptFile } = await import('../src/promptfile.js');
 const { loadConfig, saveConfig, DEFAULTS } = await import('../src/config.js');
 
 /**
@@ -195,6 +196,34 @@ test('edges round-trip, including the empty case', () => {
 test('parseNote rejects a file with no frontmatter', () => {
   assert.throws(() => store.parseNote('just a body'), /missing frontmatter/);
   assert.throws(() => store.parseNote('---\nid: x\nno terminator'), /unterminated frontmatter/);
+});
+
+test('parseNote strips a leading BOM, which Windows editors add', () => {
+  // The BOM lands in front of the opening `---`, so leaving it in place fails the
+  // frontmatter check and the whole note throws as malformed. Notes are edited by
+  // hand on a Windows desktop, so this arrives through normal use rather than
+  // through anything exotic.
+  const serialized = store.serializeNote(validateNode({ ...base }));
+  const parsed = store.parseNote(`\uFEFF${serialized}`);
+  assert.equal(parsed.id, base.id);
+  assert.equal(parsed.title, base.title);
+});
+
+test('a BOM inside the body is content and survives the round trip', () => {
+  // Only a leading BOM is an encoding marker. One in the middle is a character the
+  // note is about, and stripping it would quietly corrupt what was captured.
+  const node = validateNode({ ...base, body: `mid\uFEFFbody` });
+  assert.equal(store.parseNote(store.serializeNote(node)).body, `mid\uFEFFbody`);
+});
+
+test('toPromptFile strips a leading BOM before reading the description', () => {
+  // splitFrontmatter treats a file that does not start with `---` as all body, so an
+  // unstripped BOM does not throw here: the description silently degrades to the
+  // generic fallback and every VS Code prompt file ships with the wrong one.
+  const skill = '---\nname: recall\ndescription: "Durable project knowledge."\n---\n\nBody.\n';
+  const out = toPromptFile(`\uFEFF${skill}`, { name: 'recall' });
+  assert.match(out, /description: "Durable project knowledge\."/);
+  assert.doesNotMatch(out, /agent-memory: recall/);
 });
 
 test('contentHash ignores whitespace, trailing spaces and line endings', () => {
