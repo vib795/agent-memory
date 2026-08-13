@@ -1,17 +1,45 @@
 # agent-memory
 
-[![npm](https://img.shields.io/npm/v/@vib795/agent-memory)](https://www.npmjs.com/package/@vib795/agent-memory)
-[![test](https://github.com/vib795/agent-memory/actions/workflows/test.yml/badge.svg)](https://github.com/vib795/agent-memory/actions/workflows/test.yml)
-[![release](https://github.com/vib795/agent-memory/actions/workflows/release.yml/badge.svg)](https://github.com/vib795/agent-memory/actions/workflows/release.yml)
-[![provenance](https://img.shields.io/badge/provenance-attested-brightgreen)](https://www.npmjs.com/package/@vib795/agent-memory)
-[![node](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)](https://nodejs.org)
-[![dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](package.json)
-[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+**Durable memory for Claude Code and GitHub Copilot — that survives an IT security review.**
 
-Give **GitHub Copilot** and **Claude Code** a memory that outlives the window, the
-repository, and the week — using nothing an IT security review would need to approve.
+Your agent forgets everything between windows. Most tools that fix that cannot be
+installed where you actually work.
 
-Three user-level Agent Skills over one local store:
+This one has **zero runtime dependencies, zero dev dependencies, and no install
+script**. Nothing runs when you install it; granting it your agents is a second,
+separate command. It has been [independently scanned](#independently-scanned) and
+passed. `npm ls -g --depth 0` shows nothing underneath it, because there is nothing
+underneath it.
+
+## Install
+
+Two commands, and the second one is not optional — it creates the store and installs
+into every agent on the machine, in whatever format that tool reads:
+
+```bash
+npm install -g @vib795/agent-memory
+agent-memory setup
+```
+
+Node >= 22.5, and nothing else.
+
+In Claude Code you can take the three skills as a plugin instead of letting `setup`
+link them:
+
+```
+/plugin marketplace add vib795/agent-memory
+/plugin install agent-memory@vib795
+```
+
+The plugin carries the skills; `npm` carries the store. You want both — the skills
+will tell you so if you only have one.
+
+Behind a proxy that quarantines npm, or want the GitHub Packages mirror?
+[Every install path is here](#install-1).
+
+## What you get
+
+Three user-level Agent Skills over one local markdown store:
 
 | Skill | What it does |
 |---|---|
@@ -19,13 +47,23 @@ Three user-level Agent Skills over one local store:
 | `/remember` | Captures durable knowledge into a cross-repo graph — and fires on its own when a juncture passes |
 | `/recall` | Answers from that graph before deriving anything again |
 
-**New here? Read the [HOW-TO](HOWTO.md)** — install, first five minutes, and the
-per-tool notes for Claude Code, Codex and Copilot, written for people who do not
-want to read the rest of this file.
+The store is plain markdown in `~/.agents/memory/`, outside every repository — which
+is what lets a note written in one project be read from another. Nothing leaves the
+machine: no daemon, no scheduled task, no telemetry.
 
-**Want to know how it works?** [ARCHITECTURE.md](ARCHITECTURE.md) explains the
-design and why it is that way — the source-of-truth split, the write and read
-paths, the tiered context cost, and the invariants that hold it together.
+**New here?** [HOWTO.md](HOWTO.md) — install, first five minutes, and the per-tool
+notes for Claude Code, Codex and Copilot.
+
+**How does it work?** [ARCHITECTURE.md](ARCHITECTURE.md) — the source-of-truth split,
+the write and read paths, the tiered context cost, and the invariants underneath.
+
+[![npm](https://img.shields.io/npm/v/@vib795/agent-memory)](https://www.npmjs.com/package/@vib795/agent-memory)
+[![test](https://github.com/vib795/agent-memory/actions/workflows/test.yml/badge.svg)](https://github.com/vib795/agent-memory/actions/workflows/test.yml)
+[![release](https://github.com/vib795/agent-memory/actions/workflows/release.yml/badge.svg)](https://github.com/vib795/agent-memory/actions/workflows/release.yml)
+[![provenance](https://img.shields.io/badge/provenance-attested-brightgreen)](https://www.npmjs.com/package/@vib795/agent-memory)
+[![node](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)](https://nodejs.org)
+[![dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](package.json)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 ## Why this exists
 
@@ -476,7 +514,7 @@ Claude Code can take the same three as a plugin:
 
 ```
 /plugin marketplace add vib795/agent-memory
-/plugin install agent-memory@agent-memory
+/plugin install agent-memory@vib795
 ```
 
 The same caveat applies: the plugin carries the skills, `npm` carries the store.
