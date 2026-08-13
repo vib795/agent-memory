@@ -424,6 +424,9 @@ function cmdCompact() {
     ...r.malformed.map((m) => `warning: unparseable ${m.path}`),
     `digest ${r.digestChars} chars`,
     ...r.skills.map((s) => `updated description in ${s}`),
+    ...(r.skipped || []).map(
+      (s) => `skipped ${s}: inside this package's git checkout, so the file is tracked`
+    ),
   ].join('\n');
   return { ok: true, ...r, text };
 }
