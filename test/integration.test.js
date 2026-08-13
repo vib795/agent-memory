@@ -18,7 +18,7 @@ const idx = await import('../src/index-db.js');
 const { searchNodes } = idx;
 const { neighborhood, applyBudget } = await import('../src/graph.js');
 const { buildTree, buildDigest, renderTree } = await import('../src/digest.js');
-const { compact, writeSkillDescription } = await import('../src/compact.js');
+const { compact, writeSkillDescription, insideCheckout } = await import('../src/compact.js');
 const stale = await import('../src/staleness.js');
 const { setup, unlinkSkills, danglingSkillLinks, skillTargets, packagedSkillsDir, SKILLS } =
   await import('../src/setup.js');
@@ -238,7 +238,14 @@ test('digest of an empty store says so instead of pretending', () => {
   rmSync(paths.notes, { recursive: true, force: true });
   for (const f of [paths.db, `${paths.db}-wal`, `${paths.db}-shm`]) rmSync(f, { force: true });
   const db = idx.openDb();
-  assert.match(buildDigest(db), /currently empty/);
+  const d = buildDigest(db);
+  assert.match(d, /currently empty/);
+  // This assertion is the one that was missing. The empty branch returned early
+  // without the routing clause, so a fresh install -- the only machine that ever
+  // sees this branch -- got a Tier-1 description with no trigger phrases at all,
+  // and recall stopped advertising when to call it at exactly the moment it had
+  // to earn its first use. The seeded case above was covered; this one was not.
+  assert.match(d, /Use when you need to know/, 'an empty store still says when to call recall');
   db.close();
 });
 
@@ -1127,6 +1134,45 @@ test('every manifest that carries a version agrees with package.json', () => {
   const lock = read('../package-lock.json');
   assert.equal(lock.version, version, 'package-lock.json');
   assert.equal(lock.packages[''].version, version, 'package-lock.json packages[""]');
+});
+
+test('compact will not write a description into this package git checkout', () => {
+  // `setup` links skill directories at the package's own `skills/`, so every
+  // description write lands in package files. In an installed package that is the
+  // Tier-1 mechanism. In a checkout those files are tracked, so one developer's
+  // digest gets committed and published to everyone -- which is what happened, for
+  // twenty releases, shipping one machine's note count to every plugin user.
+  const skill = fileURLToPath(new URL('../skills/recall/SKILL.md', import.meta.url));
+  const before = readFileSync(skill, 'utf8');
+
+  assert.equal(insideCheckout(skill), true, 'the repo skill is inside the checkout');
+  assert.equal(writeSkillDescription(skill, 'CLOBBERED'), false);
+  assert.equal(readFileSync(skill, 'utf8'), before, 'the tracked file must be untouched');
+
+  // The path arrives as a symlink, never as the real path. The link lives outside
+  // the checkout while its target is inside, which is exactly why this went unseen.
+  const dir = mkdtempSync(join(tmpdir(), 'agent-memory-link-'));
+  const link = join(dir, 'SKILL.md');
+  symlinkSync(skill, link);
+  assert.equal(insideCheckout(link), true, 'a symlink must be resolved, not trusted');
+  assert.equal(writeSkillDescription(link, 'CLOBBERED'), false);
+  assert.equal(readFileSync(skill, 'utf8'), before, 'the target must survive the link path');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('the shipped recall description is generic, not one machine digest', () => {
+  // The backstop for the test above: even if something writes into the checkout
+  // again, this fails before the file can be published. The description is Tier 1 --
+  // the only thing loaded into every conversation -- so a stale one is both a false
+  // claim about the reader's own store and a standing context cost they did not earn.
+  const skill = fileURLToPath(new URL('../skills/recall/SKILL.md', import.meta.url));
+  const m = readFileSync(skill, 'utf8').match(/^description: (.*)$/m);
+  assert.ok(m, 'recall must carry a description');
+  const d = m[1];
+
+  assert.doesNotMatch(d, /\d+ notes?\b/, 'note counts describe one machine, not the reader');
+  assert.doesNotMatch(d, /Topics:/, 'the topic list is generated from one local store');
+  assert.match(d, /Use when you need to know/, 'the routing triggers must ship');
 });
 
 test('export removes personal identifiers and says what it removed', () => {

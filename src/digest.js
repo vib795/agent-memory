@@ -59,7 +59,14 @@ export function buildDigest(db, { cfg = loadConfig() } = {}) {
   const cap = cfg.digestChars;
   const total = db.prepare('SELECT COUNT(*) AS c FROM nodes WHERE archived = 0').get().c;
   if (!total) {
-    return 'Durable project knowledge store, currently empty. Run /remember to capture the first note.';
+    // USE_WHEN belongs here too. This branch used to return without it, which stripped
+    // the routing triggers from Tier 1 on exactly the machines that need them most: a
+    // fresh install, where the store is empty and the skill still has to earn its
+    // first use. An empty store is a reason to say when to call recall, not to stop.
+    return (
+      'Durable project knowledge store, currently empty. ' +
+      `Run /remember to capture the first note. ${USE_WHEN}`
+    );
   }
 
   const constraints = db
