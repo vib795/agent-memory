@@ -1,4 +1,6 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join, sep } from 'node:path';
 import { loadConfig, paths } from './config.js';
 import { listNotes, archiveNote, contentHash, nowIso, serializeNote } from './store.js';
 import { atomicWrite } from './atomic.js';
@@ -149,8 +151,40 @@ function decay(active, cfg, now) {
  * reading its description, so regenerating that line is how the store advertises
  * what it now knows without costing anything at chat time.
  */
+// The directory this package was installed into. `setup` links skill directories at
+// `<package>/skills/<name>`, so every description write lands in the package's own
+// files. That is correct for an installed package and wrong for a git checkout, where
+// those files are tracked: one developer's digest gets committed and then published to
+// everyone. It shipped that way for twenty releases, advertising one machine's five
+// notes to every user who installed the plugin.
+const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+/**
+ * Is this path inside the package's own git checkout?
+ *
+ * Resolved through `realpathSync` because the path arrives as a symlink planted by
+ * `setup`; the link sits outside the checkout even when its target is inside it, which
+ * is the whole reason this went unnoticed. The `.git` test separates a developer's
+ * working tree from an ordinary install, which has no `.git` and must keep being
+ * written to — that write is the Tier-1 mechanism, not a bug.
+ */
+export function insideCheckout(file) {
+  if (!existsSync(join(PACKAGE_ROOT, '.git'))) return false;
+  let real;
+  let root;
+  try {
+    real = realpathSync(file);
+    root = realpathSync(PACKAGE_ROOT);
+  } catch {
+    return false;
+  }
+  if (root.endsWith(sep)) root = root.slice(0, -1);
+  return real === root || real.startsWith(root + sep);
+}
+
 export function writeSkillDescription(skillPath, description) {
   if (!existsSync(skillPath)) return false;
+  if (insideCheckout(skillPath)) return false;
   const src = readFileSync(skillPath, 'utf8');
   if (!src.startsWith('---')) return false;
   const end = src.indexOf('\n---', 3);
@@ -185,10 +219,17 @@ function regenerate(db, cfg) {
   atomicWrite(paths.routing, routing);
 
   const skills = [];
+  const skipped = [];
   for (const p of cfg.skillPaths || []) {
+    // Reported, never swallowed. A description that silently did not update reads
+    // exactly like one that did, and this is the line that routes every recall.
+    if (insideCheckout(p)) {
+      skipped.push(p);
+      continue;
+    }
     if (writeSkillDescription(p, digest)) skills.push(p);
   }
-  return { digest, digestChars: digest.length, routing: paths.routing, skills };
+  return { digest, digestChars: digest.length, routing: paths.routing, skills, skipped };
 }
 
 /**
