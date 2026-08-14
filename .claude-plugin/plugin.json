@@ -1,8 +1,8 @@
 {
   "name": "agent-memory",
   "displayName": "agent-memory",
-  "version": "0.6.1",
-  "description": "Durable cross-repository memory for coding agents. Adds /handoff, /remember and /recall over one local markdown store. Requires the agent-memory CLI: npm install -g @vib795/agent-memory (Node >= 22.5).",
+  "version": "0.6.2",
+  "description": "Durable cross-repository memory for coding agents — built to survive an IT security review. Zero runtime dependencies, zero dev dependencies, no install script: nothing runs when you install it, and granting it your agents is a separate explicit command. Independently scanned, with a passing verdict. Adds /handoff, /remember and /recall over one local markdown store. Requires the CLI: npm install -g @vib795/agent-memory (Node >= 22.5).",
   "author": {
     "name": "Utkarsh Singh",
     "url": "https://github.com/vib795"
