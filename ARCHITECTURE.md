@@ -2,9 +2,9 @@
 
 How agent-memory is built, and why it is built that way.
 
-Every figure here was read from the source rather than written from memory, at the
-commit that introduced this document: 15 modules, 3,443 lines of JavaScript, zero
-runtime dependencies and zero dev dependencies, 91 tests.
+Every figure here was read from the source rather than written from memory, at
+v0.6.2: 15 modules, 3,494 lines of JavaScript, zero runtime dependencies and zero
+dev dependencies, 93 tests.
 
 ---
 
@@ -446,9 +446,9 @@ The properties that must stay true. Each is covered by the test suite.
 5. Truncation is never silent. Omitted ids are always reported.
 6. Zero runtime dependencies, zero dev dependencies.
 7. `constraint` notes are exempt from every truncation path.
-8. All three version manifests agree (`package.json`, `plugin.json`,
-   `marketplace.json`) — guarded by a test, because nothing else synced them and one
-   drifted 15 releases behind.
+8. All four version manifests agree (`package.json`, `plugin.json`,
+   `marketplace.json`, `package-lock.json`) — guarded by a test, because nothing else
+   synced them and one drifted 15 releases behind.
 
 ---
 
@@ -456,14 +456,14 @@ The properties that must stay true. Each is covered by the test suite.
 
 | Module | Lines | Responsibility |
 |---|--:|---|
-| `cli.js` | 957 | 13 commands; one process, one answer |
+| `cli.js` | 960 | 13 commands; one process, one answer |
 | `index-db.js` | 317 | SQLite cache: DDL, reindex, FTS5 search |
 | `pii.js` | 274 | export-time disclosure control |
 | `store.js` | 256 | notes as source of truth; frontmatter; atomic upsert |
-| `compact.js` | 242 | dedupe, supersede, decay, regenerate |
+| `compact.js` | 283 | dedupe, supersede, decay, regenerate |
 | `setup.js` | 222 | install into detected agent surfaces |
 | `staleness.js` | 213 | commit-distance staleness and capture gap |
-| `digest.js` | 202 | two-tier routing: description + tree |
+| `digest.js` | 209 | two-tier routing: description + tree |
 | `config.js` | 191 | engagement resolution; two-file config split |
 | `targets.js` | 140 | where each agent looks for instructions |
 | `graph.js` | 99 | recursive CTE traversal + retrieval budget |
@@ -471,7 +471,7 @@ The properties that must stay true. Each is covered by the test suite.
 | `redact.js` | 97 | capture-time fail-closed secret redaction |
 | `promptfile.js` | 78 | VS Code prompt files derived from SKILL.md |
 | `atomic.js` | 57 | atomic write; imports nothing from this package |
-| **total** | **3,443** | zero dependencies, 91 tests |
+| **total** | **3,494** | zero dependencies, 93 tests |
 
 `atomic.js` deliberately imports nothing from the package: `store.js` already imports
 `config.js`, so putting the atomic write in either would create a cycle.
