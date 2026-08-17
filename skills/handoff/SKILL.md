@@ -55,6 +55,10 @@ Write-Output "--- GIT ---"
 Write-Output "ROOT=$(git rev-parse --show-toplevel 2>$null)"
 Write-Output "BRANCH=$(git branch --show-current 2>$null)"
 Write-Output "HEAD=$(git rev-parse --short HEAD 2>$null)"
+Write-Output "--- BRANCHES ---"
+git branch --sort=-committerdate --format='%(refname:short)' 2>$null | Select-Object -First 10
+Write-Output "--- LOG ---"
+git log --oneline -8 2>$null
 Write-Output "--- STATUS ---"
 git status --porcelain 2>$null
 Write-Output "UTC=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))"
@@ -70,12 +74,20 @@ echo "--- GIT ---"
 echo "ROOT=$(git rev-parse --show-toplevel 2>/dev/null)"
 echo "BRANCH=$(git branch --show-current 2>/dev/null)"
 echo "HEAD=$(git rev-parse --short HEAD 2>/dev/null)"
+echo "--- BRANCHES ---"; git branch --sort=-committerdate --format='%(refname:short)' 2>/dev/null | head -10
+echo "--- LOG ---"; git log --oneline -8 2>/dev/null
 echo "--- STATUS ---"; git status --porcelain 2>/dev/null
 echo "UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
 If the directory is not a git repository, `ROOT`/`BRANCH`/`HEAD` come back empty.
 That is not an error. Record the working directory path and omit the git fields.
+
+`BRANCHES` is there because the current branch is rarely the whole story. Work that
+stages a change across two branches — one holding the old configuration for a first
+run, another carrying the new one — leaves the second branch invisible to
+`--show-current`, and a branch you were never shown is a branch you cannot record.
+Read the list before writing Execution protocol.
 
 ---
 
@@ -132,6 +144,17 @@ Written for a reader with zero prior context.
 Things not discoverable by reading the code: environment restrictions,
 unavailable tooling, plan limits, deadlines, taste calls already settled.
 
+## Execution protocol
+
+The sequence this work is run in, when the sequence is not obvious from the code.
+Branch choreography, pipeline order, which environment goes first, what has to be
+staged before what, what must be true before a step is safe to repeat.
+
+Write the shape of the operation, not this run's position in it. "Run the pipeline
+from a branch holding the old configuration, then from the working branch with the
+new one" belongs here. "Dev is done, UAT is next" does not — that is Current task
+state. Mandatory. `None.` when the work genuinely has no ordering.
+
 ## Rejected approaches
 
 What was tried and why it failed. Mandatory. This is the section that stops the
@@ -175,7 +198,8 @@ These separate a useful handoff from a readable paragraph that still leaves ques
    inferred with `inferred:` so the next agent knows to verify it.
 6. Never inline a diff or a patch. List changed files with one line each.
 7. Soft target 150 lines. On overflow, move detail into `<id>.detail.md` and
-   reference it. Never drop Decisions or Rejected approaches to hit the target.
+   reference it. Never drop Decisions, Execution protocol, or Rejected approaches
+   to hit the target.
 8. Empty sections say `None.` They are never deleted. A missing section reads as
    an oversight; an explicit `None.` reads as a fact.
 
@@ -252,6 +276,13 @@ request, which is the only reason this step belongs here rather than in its own 
 <!-- extraction-rules:start -->
 - A node is durable only if it will still be true next month. Task state is not
   durable and belongs in a handoff file, not in the graph.
+- A repeatable **procedure** is durable even though it reads like task state, and it
+  is the exception most often missed. "Run the pipeline from a branch holding the old
+  configuration, then from the working branch carrying the new one" is a `convention`:
+  it will be true the next time anyone does this. The test is whether the sentence
+  describes *this run* — not durable — or *how this kind of run is done* — durable.
+  Branch choreography, deploy ordering and staging sequences all pass that test and
+  are routinely dropped because the previous rule makes them look like status.
 - Every `decision` node carries its why and its rejected alternatives, or it is not
   written. Rationale is the thing that never survives re-explanation.
 - Anything the conversation did not actually establish is `confidence: inferred`,
@@ -303,7 +334,19 @@ describe the same thing and the user should know.
 
 ---
 
-## Step 8 — Print the pickup line
+## Step 8 — Print the pickup lines
+
+Two different jobs pick up a handoff, and one line cannot serve both.
+
+**Continuing** is the same work in another window: same repository, same branch, the
+Next action is the next thing to do.
+
+**Replicating** is the same *kind* of work in a different repository. There the Next
+action is wrong by construction — it names branches, paths and environments that
+belong to the repo this file was written in. An agent told to "follow the Next
+action" in a different repo will either execute the wrong step or go read the
+original repo off disk to work out what was meant, and both burn the user's credits
+to arrive somewhere worse than a cold start.
 
 End your reply with exactly this, and nothing after it:
 
@@ -311,21 +354,34 @@ End your reply with exactly this, and nothing after it:
 Handoff written: <absolute path to id.md>
 Thread: <id> (<created|updated>)
 
-Paste this in the other window:
+Continue in another window (same repo):
 Read <absolute path to id.md> and continue this work. Follow the Next action.
+
+Replicate in a different repo:
+Read <absolute path to id.md>. It describes work done in <repo name>. Do the
+equivalent here: follow Execution protocol, and re-derive every specific — branch
+names, file paths, module versions — from this repository. Do not open <repo name>
+and do not assume its Next action applies. Tell me the plan before you edit.
 ```
+
+Print both. The user knows which window they are pasting into; you do not.
 
 ---
 
 ## Self-check before you write
 
-Answer all five. If any is no, fix the file before writing it.
+Answer all six. If any is no, fix the file before writing it.
 
 1. Could a fresh agent execute **Next action** from this file alone?
-2. Does every decision state why, and what was rejected?
-3. Is Rejected approaches non-empty, or explicitly `None.`?
-4. Is every claim anchored to a path or a decision number?
-5. Is there a single secret, token, or connection string left in the body?
+2. Could an agent **in a different repository** replicate this work from this file
+   alone, without opening the repo it was written in? If it would have to go read
+   the original source to understand the shape of the change, Execution protocol is
+   too thin. This is the question that catches a handoff which reads well and is
+   still not portable.
+3. Does every decision state why, and what was rejected?
+4. Is Rejected approaches non-empty, or explicitly `None.`?
+5. Is every claim anchored to a path or a decision number?
+6. Is there a single secret, token, or connection string left in the body?
 
 ---
 
