@@ -41,8 +41,14 @@ Invoke this yourself the moment one of these has just happened, in the same turn
 
 - a **decision** was settled, and the reasons and rejected options are still in view
 - a **constraint** surfaced — a blocked tool, a policy, an environment restriction
+- a **tool you reached for was not there** — not on `PATH`, not installed, not
+  permitted. A command that failed because the machine does not have it is a
+  `constraint`, and an unrecorded one is a tool call you will spend again in every
+  future session on that machine
 - a **root cause** was found, as opposed to a symptom worked around
 - a **convention** was agreed, or discovered by reading the code
+- a **procedure** ran end to end and worked — the order of the steps is now known,
+  and it is about to be forgotten
 
 Do not capture on a timer, on a tool count, or at every reply. Those produce volume,
 and volume is what makes a graph useless — a store full of task chatter is worse than
@@ -78,6 +84,13 @@ most turns.
 <!-- extraction-rules:start -->
 - A node is durable only if it will still be true next month. Task state is not
   durable and belongs in a handoff file, not in the graph.
+- A repeatable **procedure** is durable even though it reads like task state, and it
+  is the exception most often missed. "Run the pipeline from a branch holding the old
+  configuration, then from the working branch carrying the new one" is a `convention`:
+  it will be true the next time anyone does this. The test is whether the sentence
+  describes *this run* — not durable — or *how this kind of run is done* — durable.
+  Branch choreography, deploy ordering and staging sequences all pass that test and
+  are routinely dropped because the previous rule makes them look like status.
 - Every `decision` node carries its why and its rejected alternatives, or it is not
   written. Rationale is the thing that never survives re-explanation.
 - Anything the conversation did not actually establish is `confidence: inferred`,
@@ -97,7 +110,7 @@ Types:
 |---|---|
 | `system` | how a thing works, anchored to a `path:line` |
 | `decision` | what was chosen, why, and what was rejected |
-| `convention` | how this codebase does something, and the gotcha |
+| `convention` | how this codebase does something, and the gotcha — including multi-step procedures, branch choreography, and deploy ordering |
 | `constraint` | what the environment or the org forbids |
 
 ---
