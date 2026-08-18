@@ -164,6 +164,26 @@ function cmdSetup() {
     );
   }
 
+  // Naming what did not install is the whole point. A run that silently installs
+  // eleven of twelve reads as a success and sends the user back to an editor that is
+  // still missing a skill.
+  if (r.failed.length) {
+    lines.push('', '  Failed:');
+    for (const f of r.failed) lines.push(`    [failed] ${f.path} — ${f.error}`);
+    lines.push(
+      '',
+      '  A path that will not clear is usually a leftover link from an install that has',
+      '  since moved. `agent-memory uninstall` reclaims those, then run setup again.',
+    );
+  }
+  if (r.compactError) {
+    lines.push(
+      '',
+      `  Skills are installed, but refreshing the /recall description failed: ${r.compactError}`,
+      '  Run `agent-memory index` then `agent-memory compact` to retry just that step.',
+    );
+  }
+
   return {
     ok: true,
     ...r,

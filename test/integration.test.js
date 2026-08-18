@@ -1078,6 +1078,93 @@ test('uninstall removes our links and prompt files, spares foreign ones, keeps n
   }
 });
 
+test('uninstall reclaims a link whose install location moved or vanished', () => {
+  // The field report this fixes: skills installed from a checkout, the checkout later
+  // deleted, and every link then disowned because it no longer resolved to the current
+  // package. `uninstall` kept them as "not ours" and `setup` would not replace what it
+  // would not clear, so no command in the tool could repair the machine.
+  seed().close();
+  const home = fakeHome({ claude: true });
+  try {
+    const dir = skillTargets()[0];
+    mkdirSync(dir, { recursive: true });
+    const stale = join(dir, 'handoff');
+    symlinkSync(join(home, 'deleted-checkout', 'skills', 'handoff'), stale);
+
+    const r = unlinkSkills();
+    assert.ok(r.removed.includes(stale), 'a link pointing nowhere is ours to clear');
+    assert.ok(!r.kept.includes(stale), "and must not be reported as someone else's");
+    assert.equal(existsSync(stale), false);
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a hand-made skill directory is still not ours to remove', () => {
+  // The other half of the same rule. Widening ownership to reclaim stale links must
+  // not widen it to a skill the user wrote, which is why a lone SKILL.md with no
+  // siblings stays put.
+  seed().close();
+  const home = fakeHome({ claude: true });
+  try {
+    const dir = skillTargets()[0];
+    mkdirSync(dir, { recursive: true });
+    const mine = join(home, 'my-own-skills', 'handoff');
+    mkdirSync(mine, { recursive: true });
+    writeFileSync(join(mine, 'SKILL.md'), '---\nname: handoff\n---\nmine\n', 'utf8');
+    const link = join(dir, 'handoff');
+    symlinkSync(mine, link);
+
+    const r = unlinkSkills();
+    assert.ok(r.kept.includes(link), 'a live link outside any agent-memory tree is left alone');
+    assert.equal(existsSync(join(mine, 'SKILL.md')), true, 'and its target survives');
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('setup replaces a link left behind by a vanished install', () => {
+  seed().close();
+  const home = fakeHome({ claude: true });
+  try {
+    const dir = skillTargets()[0];
+    mkdirSync(dir, { recursive: true });
+    symlinkSync(join(home, 'gone', 'skills', 'handoff'), join(dir, 'handoff'));
+
+    const r = setup({});
+    assert.deepEqual(r.failed, [], 'a stale link is cleared, not a failure');
+    assert.ok(existsSync(join(dir, 'handoff', 'SKILL.md')), 'link now resolves to the package');
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('setup reports a failing compact instead of discarding the whole run', () => {
+  // compact runs last and touches every registered skill path, so it is the step most
+  // likely to throw on a machine with a stale registration. Linking is already on disk
+  // by then; throwing away the report of it leaves the user with no output at all.
+  seed().close();
+  const home = fakeHome({ claude: true });
+  try {
+    const r = setup({
+      compactFn: () => {
+        throw new Error('ENOENT: no such file or directory');
+      },
+    });
+    assert.match(r.compactError, /ENOENT/);
+    assert.ok(r.installed.length > 0, 'the skills that did install are still reported');
+    for (const name of SKILLS) {
+      assert.ok(existsSync(join(skillTargets()[0], name)), `${name} installed despite compact`);
+    }
+  } finally {
+    delete process.env.AGENT_MEMORY_SKILLS_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('a link left pointing at a removed package is detected', () => {
   seed().close();
   const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
