@@ -15,7 +15,8 @@ import { compact, maybeCompact } from './compact.js';
 import { staleness, currentRepo, reviewCandidates, captureGap } from './staleness.js';
 import { setup as runSetup, unlinkSkills, danglingSkillLinks, SKILLS } from './setup.js';
 import { detectTargets, installableTargets } from './targets.js';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { atomicWrite } from './atomic.js';
 import { redactNodeForExport, buildReceipt, renderReceipt } from './pii.js';
 
@@ -28,6 +29,41 @@ import { redactNodeForExport, buildReceipt, renderReceipt } from './pii.js';
  */
 
 const MIN_NODE = [22, 5];
+
+/**
+ * Where this process is actually running from, and what version it is.
+ *
+ * "What am I running" is the first question in every install problem and used to need
+ * `npm list -g` to answer, which reports what npm believes rather than what is on PATH.
+ * These read the package next to the running code, so they answer for the copy that
+ * will actually execute.
+ */
+function packageRoot() {
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..');
+}
+
+function installedVersion() {
+  try {
+    return JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8')).version;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * Whether the running code lives outside any `node_modules` tree.
+ *
+ * `npm install -g <folder>` links rather than copies, so a global install can be a
+ * pointer at a checkout the user will eventually tidy away — and skill links, which
+ * resolve relative to this file, follow it there. Node resolves symlinks before it sets
+ * `import.meta.url`, so the link itself is already invisible from in here; what stays
+ * visible, and is the thing that actually matters, is that the code is not sitting in an
+ * installed package. Running from a working copy is legitimate, so this reports the
+ * condition rather than failing on it.
+ */
+function runningFromWorkingCopy() {
+  return !packageRoot().split(sep).includes('node_modules');
+}
 
 function parseArgs(argv) {
   const opts = { _: [] };
@@ -92,6 +128,8 @@ const USAGE = `agent-memory — durable cross-repo knowledge for coding agents
   import <file> [--dry-run]              bring an export in, provenance intact
   engagement [show|list|use <name>]      which client store this window writes to
              [purge <name> --yes]        delete one engagement's store entirely
+
+  --version                              this version, and the path it runs from
 
 Add --json to any command for machine-readable output.
 Engagement: ${ENGAGEMENT.name} (${ENGAGEMENT.source})
@@ -459,6 +497,25 @@ function cmdDoctor() {
   // First, because everything below it is a fact about one engagement's store and
   // reading it against the wrong client is the mistake this is here to prevent.
   add('engagement', true, `${ENGAGEMENT.name} (${ENGAGEMENT.source})`);
+
+  // Second, because "which version is this" preceded every other question in the one
+  // install failure this tool has actually been debugged through, and answering it
+  // needed a separate npm command that reports what npm believes rather than what ran.
+  add('version', true, `${installedVersion()} at ${packageRoot()}`);
+
+  // Skill links point at whatever copy of the code creates them. When that copy is a
+  // working directory rather than an installed package, deleting the directory dangles
+  // every link at once — which is exactly how this tool's own skill links were lost.
+  // Reported, not failed: running from a checkout is a normal thing to do deliberately.
+  add(
+    'runs from an installed package',
+    true,
+    runningFromWorkingCopy()
+      ? `no — working copy at ${packageRoot()}; skill links will point here, so moving or ` +
+        'deleting it breaks them. For a durable install: `npm pack` then ' +
+        '`npm install -g <tgz>`, and re-run setup.'
+      : 'yes',
+  );
 
   add('node version', nodeVersionOk(), `${process.versions.node} (need >= ${MIN_NODE.join('.')})`);
   if (!nodeVersionOk()) {
@@ -931,6 +988,12 @@ function main(argv) {
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
     process.stdout.write(`${USAGE}\n`);
+    return 0;
+  }
+  if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
+    // Prints the path as well as the number. A version alone cannot tell you that the
+    // binary on PATH belongs to a different install than the one you just upgraded.
+    process.stdout.write(`${installedVersion()}\n${packageRoot()}\n`);
     return 0;
   }
   const fn = COMMANDS[cmd];

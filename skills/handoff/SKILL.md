@@ -129,6 +129,12 @@ repos:
 agent: copilot | claude-code
 ---
 
+> **If the repository you are reading this in is not listed under `repos:` above, you are
+> replicating this work, not continuing it.** Follow Execution protocol, re-derive every
+> path, branch name and version from the repository you are actually in, and read Next
+> action as a record of what happened elsewhere rather than as an instruction. Do not open
+> the repository this was written in.
+
 ## Orientation
 
 3 to 5 sentences. What this thread is trying to accomplish and where it stands.
@@ -193,7 +199,9 @@ These separate a useful handoff from a readable paragraph that still leaves ques
 3. Never quote or paraphrase the transcript. Record conclusions, not the path to them.
 4. Anchor claims to a file path or a decision number. "We refactored the service
    layer" is a failure. "`src/services/order.ts:42` now returns `Result<T>` instead
-   of throwing" is not.
+   of throwing" is not. When the thread spans more than one repository, name the repo
+   alongside the path: an unqualified path in a two-repo thread is a path the reader
+   goes looking for in the wrong tree, and finding it there is worse than not finding it.
 5. Record only what the conversation actually established. Prefix anything you
    inferred with `inferred:` so the next agent knows to verify it.
 6. Never inline a diff or a patch. List changed files with one line each.
@@ -296,8 +304,15 @@ request, which is the only reason this step belongs here rather than in its own 
 - Zero durable knowledge is a valid outcome. Writing nothing beats writing noise.
 <!-- extraction-rules:end -->
 
-Your Decisions table and Constraints section are usually already the durable part.
-The Current task state section never is.
+Your Decisions table, Constraints section and **Execution protocol** are usually already
+the durable part. Write the protocol as a `convention`: it is the section a second
+repository actually needs, and the one most easily lost, because a sequence of steps
+reads like status even when it describes how every run of this kind is done. A handoff
+that records the protocol while the graph does not still leaves the next repository
+guessing — the handoff is read once, by whoever was handed the path, and the graph is
+what `/recall` reaches for afterwards.
+
+The Current task state section never is durable.
 
 ### Write it (ONE terminal call)
 
