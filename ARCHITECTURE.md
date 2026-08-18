@@ -3,8 +3,8 @@
 How agent-memory is built, and why it is built that way.
 
 Every figure here was read from the source rather than written from memory, at
-v0.6.2: 15 modules, 3,494 lines of JavaScript, zero runtime dependencies and zero
-dev dependencies, 93 tests.
+v0.6.4: 15 modules, 3,574 lines of JavaScript, zero runtime dependencies and zero
+dev dependencies, 97 tests.
 
 ---
 
@@ -456,12 +456,12 @@ The properties that must stay true. Each is covered by the test suite.
 
 | Module | Lines | Responsibility |
 |---|--:|---|
-| `cli.js` | 960 | 13 commands; one process, one answer |
+| `cli.js` | 980 | 13 commands; one process, one answer |
 | `index-db.js` | 317 | SQLite cache: DDL, reindex, FTS5 search |
 | `pii.js` | 274 | export-time disclosure control |
 | `store.js` | 256 | notes as source of truth; frontmatter; atomic upsert |
 | `compact.js` | 283 | dedupe, supersede, decay, regenerate |
-| `setup.js` | 222 | install into detected agent surfaces |
+| `setup.js` | 282 | install into detected agent surfaces |
 | `staleness.js` | 213 | commit-distance staleness and capture gap |
 | `digest.js` | 209 | two-tier routing: description + tree |
 | `config.js` | 191 | engagement resolution; two-file config split |
@@ -471,7 +471,7 @@ The properties that must stay true. Each is covered by the test suite.
 | `redact.js` | 97 | capture-time fail-closed secret redaction |
 | `promptfile.js` | 78 | VS Code prompt files derived from SKILL.md |
 | `atomic.js` | 57 | atomic write; imports nothing from this package |
-| **total** | **3,494** | zero dependencies, 93 tests |
+| **total** | **3,574** | zero dependencies, 97 tests |
 
 `atomic.js` deliberately imports nothing from the package: `store.js` already imports
 `config.js`, so putting the atomic write in either would create a cycle.

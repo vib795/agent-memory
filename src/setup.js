@@ -55,9 +55,43 @@ function clear(path) {
       // end stay put — which is exactly what passing `recursive` here would risk.
       rmdirSync(path);
     }
+    // `force` tells rmSync to swallow ENOENT, and a junction whose target is gone can
+    // answer the stat rmSync makes with ENOENT while the reparse point itself stays on
+    // disk. The removal then reports success and changes nothing, after which
+    // symlinkSync fails EEXIST and the copy fallback lands on a path that still
+    // exists. Checking is what turns that silent no-op into an error naming the path.
+    if (isLink(path)) rmdirSync(path);
   } else if (existsSync(path)) {
     rmSync(path, { recursive: true, force: true });
   }
+}
+
+/**
+ * Decide whether a skill link at a path we manage was put there by this tool.
+ *
+ * Identity cannot be "points at where we live right now". An install that has since
+ * moved, or a checkout that was deleted, leaves a link that test would disown — and a
+ * disowned link is unreclaimable: `uninstall` keeps it as "not ours" and `setup`
+ * cannot replace what it will not clear, so the user is left holding a broken link
+ * that no command in this tool will fix.
+ */
+function ownsLink(link, name) {
+  let dest;
+  try {
+    dest = resolve(readlinkSync(link));
+  } catch {
+    // A link sitting at one of our paths whose target cannot even be read is ours to
+    // clear. Nothing downstream can use it either.
+    return true;
+  }
+  if (dest === join(packagedSkillsDir(), name)) return true;
+  // Dangling. Nothing is lost by reclaiming a link that points nowhere, and leaving it
+  // is precisely what deadlocks both commands.
+  if (!existsSync(dest)) return true;
+  // Live, but pointing into some other agent-memory tree — an older global install, or
+  // a checkout the user set up from. The signature is that its parent holds all three
+  // of our skills, which a hand-written skill directory would not.
+  return SKILLS.every((s) => existsSync(join(dirname(dest), s, 'SKILL.md')));
 }
 
 /**
@@ -130,7 +164,6 @@ export function danglingSkillLinks() {
  * that indexed them; removing them is a separate, deliberate act.
  */
 export function unlinkSkills() {
-  const packaged = packagedSkillsDir();
   const removed = [];
   const kept = [];
 
@@ -141,11 +174,9 @@ export function unlinkSkills() {
         if (!existsSync(link) && !isLink(link)) continue;
         let owned = false;
         try {
-          owned = isLink(link)
-            ? resolve(readlinkSync(link)) === join(packaged, name)
-            : existsSync(join(link, 'SKILL.md'));
+          owned = isLink(link) ? ownsLink(link, name) : existsSync(join(link, 'SKILL.md'));
         } catch {
-          // A link we cannot read is a link we cannot claim. Leave it.
+          // A directory we cannot stat is one we cannot claim. Leave it.
           owned = false;
         }
         if (owned) {
@@ -182,15 +213,30 @@ export function setup({ compactFn } = {}) {
   const targets = installableTargets();
   const installed = [];
   const copies = [];
+  const failed = [];
 
   for (const target of targets) {
     for (const name of SKILLS) {
-      const r =
-        target.kind === 'skill-dir'
-          ? linkSkill(name, target.dir)
-          : writePromptFile(name, target.dir);
-      installed.push({ ...r, target: target.id, label: target.label });
-      if (r.mode === 'copy') copies.push(r);
+      // Isolated per skill. One unwritable target used to abort the whole run and
+      // discard the report with it, so a user whose `.copilot` link was wedged got no
+      // output at all and no hint that the other eleven had been fine. A failure here
+      // is data to print, not a reason to stop.
+      try {
+        const r =
+          target.kind === 'skill-dir'
+            ? linkSkill(name, target.dir)
+            : writePromptFile(name, target.dir);
+        installed.push({ ...r, target: target.id, label: target.label });
+        if (r.mode === 'copy') copies.push(r);
+      } catch (err) {
+        failed.push({
+          name,
+          target: target.id,
+          label: target.label,
+          path: join(target.dir, target.kind === 'skill-dir' ? name : `${name}.prompt.md`),
+          error: err.message,
+        });
+      }
     }
   }
 
@@ -209,11 +255,25 @@ export function setup({ compactFn } = {}) {
 
   // compact is passed in so this module does not pull the database into memory just
   // to make some symlinks.
-  const result = compactFn ? compactFn() : null;
+  //
+  // Its failure must not sink the run. Linking is already done and written to disk by
+  // this point, so throwing here would throw away an accurate report of work that
+  // actually happened and leave the user with no idea any of it succeeded. compact
+  // touches every registered skill path, which is exactly the set most likely to hold
+  // a stale entry, so it is the step most likely to throw.
+  let result = null;
+  let compactError = null;
+  try {
+    result = compactFn ? compactFn() : null;
+  } catch (err) {
+    compactError = err.message;
+  }
   return {
     targets,
     installed,
     copies,
+    failed,
+    compactError,
     skillPaths,
     home: agentHome(),
     digest: result?.digest ?? null,
