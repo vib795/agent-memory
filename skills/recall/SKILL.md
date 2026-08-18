@@ -62,6 +62,11 @@ and what a regex does badly.
 - Pick 1 to 3 ids. More than 3 means the question is really several questions.
 - Always include a `constraint` that touches the subject, even when the user did not
   ask about limits. Constraints are what stop an approach that cannot ship.
+- When the question is about **doing** the work rather than understanding it, also
+  include the `convention` that governs how that kind of work is executed. A constraint
+  tells you which steps are forbidden; only a procedure tells you what order the allowed
+  ones go in. Branch choreography and deploy ordering live here, and they are what a
+  second repository gets wrong when nobody surfaces them.
 - Nothing in the tree looks relevant → go to Step 4.
 
 ---

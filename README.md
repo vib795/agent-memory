@@ -427,15 +427,31 @@ GitHub, and it is the path to use behind a proxy that blocks or quarantines npm:
 
 ```bash
 git clone https://github.com/vib795/agent-memory.git
-npm install -g ./agent-memory
+cd agent-memory && npm pack
+npm install -g ./vib795-agent-memory-*.tgz
 agent-memory setup
 ```
 
-**Do not install from the git URL directly.** `npm install -g <git-url>` does not
+**Pack first; do not install the directory.** `npm install -g ./agent-memory` looks
+equivalent and is not: npm links the global install to that folder rather than copying
+it, which shows up as an arrow in `npm list -g`:
+
+```
+`-- @vib795/agent-memory@0.6.5 -> .\..\..\..\agent-memory
+```
+
+Move or delete the clone afterwards and the global install points at nothing — the same
+breakage as the git-URL case below, arriving later and harder to trace. Installing a
+packed tarball copies, so the clone becomes disposable. Verified on npm 11.x.
+
+**Do not install from the git URL directly either.** `npm install -g <git-url>` does not
 work for this package: npm resolves a git install through
 `~/.npm/_cacache/tmp/git-clone*` and then removes that directory, leaving the global
-install pointing at a path that no longer exists. Cloning first avoids npm's git
-handling entirely. Verified on npm 11.18.
+install pointing at a path that no longer exists. Verified on npm 11.18.
+
+**And run the installed binary, not the checkout.** Skill links resolve relative to the
+code that creates them, so `npm run setup` inside a clone aims every link at that clone.
+Use `agent-memory setup`, which runs the copy npm installed.
 
 Every release is mirrored to **GitHub Packages**. Treat that as redundancy rather
 than a second front door: GitHub Packages requires authentication even for public
