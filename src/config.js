@@ -103,6 +103,7 @@ export const DEFAULTS = {
   captureGapCommits: 50, // repo movement with no capture at all before it is worth saying
   compactThreshold: 10, // node-count delta that triggers an automatic compact
   briefRecentMinutes: 120, // window the capture brief calls already covered
+  briefRecentIds: 10, // ids printed from that window before the rest are counted
 };
 
 // Written by the installer: every SKILL.md whose description compact regenerates.
@@ -134,7 +135,10 @@ export function loadConfig() {
   const merged = { ...DEFAULTS, skillPaths: [] };
 
   for (const [k, v] of Object.entries(readJson(paths.config))) {
-    if (k in DEFAULTS && typeof v === 'number' && Number.isFinite(v) && v > 0) merged[k] = v;
+    // Integer, not merely finite. Every cap here counts something, and one of them is
+    // bound into a SQL `LIMIT`, where a fractional value is a datatype mismatch rather
+    // than a rounding question.
+    if (k in DEFAULTS && Number.isSafeInteger(v) && v > 0) merged[k] = v;
   }
   const machine = readJson(paths.machineConfig);
   for (const k of LIST_KEYS) {
@@ -163,7 +167,7 @@ export function saveConfig(patch) {
   let capsDirty = false;
   let machineDirty = false;
   for (const [k, v] of Object.entries(patch || {})) {
-    if (k in DEFAULTS && typeof v === 'number' && Number.isFinite(v) && v > 0) {
+    if (k in DEFAULTS && Number.isSafeInteger(v) && v > 0) {
       caps[k] = v;
       capsDirty = true;
     }

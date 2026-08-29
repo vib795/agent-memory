@@ -1,4 +1,5 @@
 import { loadConfig, NOTE_TYPES } from './config.js';
+import { createHash } from 'node:crypto';
 import { captureGap, currentRepo } from './staleness.js';
 
 /**
@@ -30,6 +31,47 @@ const TYPE_ORDER = ['constraint', 'decision', 'convention', 'system'];
 const USE_WHEN =
   'Use when you need to know how a system works, why a decision was made, ' +
   'what convention applies, or what the environment forbids.';
+
+/**
+ * A repository name safe to put in front of a model.
+ *
+ * `currentRepo` is `basename(git rev-parse --show-toplevel)` — a directory name. That
+ * value reaches Tier 1, the one string loaded into every conversation, and
+ * `writeSkillDescription` only JSON-quotes the line, which keeps the YAML valid and
+ * does nothing about the content.
+ *
+ * The charset filter alone is not enough, and the reason is specific: a GitHub
+ * repository name is drawn from exactly this charset, so
+ * `SYSTEM-ignore-previous-instructions` survives it unchanged and arrives by nothing
+ * more exotic than `git clone`. Hyphens separate words as well as spaces do.
+ *
+ * So shape decides. A repository name is one to three segments and short; an
+ * instruction needs more words than that. Anything outside that shape is rendered as a
+ * stable non-semantic identifier instead — the name is still distinguishable from
+ * another repository's, and still tells a reader in the wrong tree that the numbers are
+ * not theirs, which is the only job it had.
+ *
+ * The cost is honest: a legitimate four-segment name shows as `repo-<hash>`. That is a
+ * deliberate trade of some legibility for a Tier-1 string that cannot be authored by
+ * whoever chose the directory name.
+ *
+ * Display only. Every query still matches on the real name, because a repository whose
+ * notes stopped being found would be a worse bug than the one this closes.
+ */
+export function safeRepo(name) {
+  if (typeof name !== 'string' || !name) return 'unnamed';
+  // Filtering must not be able to *make* a name look ordinary. Stripping the spaces
+  // out of "Ignore previous instructions" collapses it into one long token that would
+  // pass the shape test below, so a name that had to be modified at all is already
+  // outside the shape and goes straight to an identifier.
+  const untouched = /^[A-Za-z0-9._-]+$/.test(name);
+  const segments = name.split(/[-._]+/).filter(Boolean);
+  if (untouched && segments.length <= 3 && name.length <= 32) return name;
+  // Stable across runs and machines, so the same repository always reads the same and
+  // two repositories never collide in the description.
+  return `repo-${createHash('sha256').update(name).digest('hex').slice(0, 8)}`;
+}
+
 
 function typeRank(type) {
   const i = TYPE_ORDER.indexOf(type);
@@ -88,7 +130,7 @@ export function buildDigest(db, { cfg = loadConfig() } = {}) {
        ORDER BY c DESC, r.repo
     `)
     .all()
-    .map((r) => r.repo);
+    .map((r) => safeRepo(r.repo));
 
   const topics = db
     .prepare(`
@@ -210,17 +252,20 @@ export function buildCaptureNudge(db, { cfg = loadConfig(), cwd = process.cwd(),
   // and the commit branches below stay on that same definition. The broader count is
   // reserved for the covered branches, where the question is how much knowledge applies
   // here rather than how much of it was captured here.
+  // Display only. `repoScopedCount` below is still given the real name.
+  const label = safeRepo(g.repo);
+
   if (g.notes === 0) {
     // captureGap withholds its note on a repository too young for the absence to mean
     // anything. Stay silent with it: nagging on commit three is how a signal gets
     // discounted long before the day it matters.
     return compose(
-      g.note ? `Nothing has ever been captured for ${g.repo} — ${g.commits} commits of history.` : null,
+      g.note ? `Nothing has ever been captured for ${label} — ${g.commits} commits of history.` : null,
     );
   }
 
   // Captured, but the repository has moved a long way since the most recent one.
-  if (g.note) return compose(`${g.commits} commits since anything was captured for ${g.repo}.`);
+  if (g.note) return compose(`${g.commits} commits since anything was captured for ${label}.`);
 
   // Current on commits, but blind in the type that matters most. `digest` privileges
   // constraints and never drops them from Tier 1; a store holding none has not recorded
@@ -228,13 +273,13 @@ export function buildCaptureNudge(db, { cfg = loadConfig(), cwd = process.cwd(),
   const notes = repoScopedCount(db, g.repo);
   if (repoScopedCount(db, g.repo, PRIVILEGED) === 0) {
     return compose(
-      `${notes} note${notes === 1 ? '' : 's'} for ${g.repo} and no constraint recorded — ` +
+      `${notes} note${notes === 1 ? '' : 's'} for ${label} and no constraint recorded — ` +
         'what this environment forbids has never been written down.',
     );
   }
 
   // Covered. Report the state plainly and let the routing clause do the rest.
-  return compose(`${notes} note${notes === 1 ? '' : 's'} for ${g.repo}, capture is current.`);
+  return compose(`${notes} note${notes === 1 ? '' : 's'} for ${label}, capture is current.`);
 }
 
 /**
@@ -301,7 +346,7 @@ export function buildTree(db, { repo = null, all = false, cfg = loadConfig() } =
 }
 
 export function renderTree(result) {
-  const scope = result.repo ? result.repo : 'all repos';
+  const scope = result.repo ? safeRepo(result.repo) : 'all repos';
   const out = [`# memory: ${scope} — ${result.total} notes`];
   const width = result.lines.reduce((w, e) => Math.max(w, e.id.length), 0);
   for (const e of result.lines) {
@@ -366,10 +411,15 @@ function typeCounts(db, repo) {
  * window wide enough to cover the working session is the honest approximation.
  */
 function recentlyCaptured(db, repo, cfg, now) {
+  // Bound straight into SQLite's `LIMIT ?`, which rejects a REAL with `datatype
+  // mismatch`. Callers may hand in a cfg that never went through loadConfig -- every
+  // test does -- so the floor lives here as well as there.
+  const cap = Math.max(1, Math.floor(cfg.briefRecentIds));
   // Same format store.js writes, so a lexicographic compare is a chronological one.
   const cutoff = new Date(now - cfg.briefRecentMinutes * 60000)
     .toISOString()
     .replace(/\.\d{3}Z$/, 'Z');
+  // One row past the cap is the cheap overflow probe.
   const rows = repo
     ? db
         .prepare(`
@@ -378,15 +428,31 @@ function recentlyCaptured(db, repo, cfg, now) {
             LEFT JOIN node_repos r ON r.node_id = n.id
            WHERE n.archived = 0 AND n.updated >= ? AND (n.scope = 'global' OR r.repo = ?)
            ORDER BY n.updated DESC, n.id
+           LIMIT ?
         `)
-        .all(cutoff, repo)
+        .all(cutoff, repo, cap + 1)
     : db
         .prepare(`
           SELECT id, updated FROM nodes
            WHERE archived = 0 AND updated >= ? ORDER BY updated DESC, id
+           LIMIT ?
         `)
-        .all(cutoff);
-  return rows.map((r) => r.id);
+        .all(cutoff, cap + 1);
+
+  if (rows.length <= cap) return { ids: rows.map((r) => r.id), omitted: 0 };
+
+  // The exact count is only worth a second query when there is something to report.
+  const total = repo
+    ? db
+        .prepare(`
+          SELECT COUNT(DISTINCT n.id) AS c
+            FROM nodes n
+            LEFT JOIN node_repos r ON r.node_id = n.id
+           WHERE n.archived = 0 AND n.updated >= ? AND (n.scope = 'global' OR r.repo = ?)
+        `)
+        .get(cutoff, repo).c
+    : db.prepare('SELECT COUNT(*) AS c FROM nodes WHERE archived = 0 AND updated >= ?').get(cutoff).c;
+  return { ids: rows.slice(0, cap).map((r) => r.id), omitted: total - cap };
 }
 
 /**
@@ -411,6 +477,7 @@ export function buildBrief(db, { repo, cwd = process.cwd(), cfg = loadConfig(), 
   const g = gap !== undefined ? gap : here ? captureGap(db, { cwd, cfg, repo: here }) : null;
   const tree = buildTree(db, { repo: here, cfg });
   const counts = typeCounts(db, here);
+  const recent = recentlyCaptured(db, here, cfg, now);
 
   return {
     repo: here,
@@ -418,15 +485,16 @@ export function buildBrief(db, { repo, cwd = process.cwd(), cfg = loadConfig(), 
     tree,
     counts: Object.fromEntries(counts),
     missing: NOTE_TYPES.filter((t) => counts.get(t) === 0),
-    recent: recentlyCaptured(db, here, cfg, now),
+    recent: recent.ids,
+    recentOmitted: recent.omitted,
     recentMinutes: cfg.briefRecentMinutes,
     total: tree.total,
   };
 }
 
 export function renderBrief(result) {
-  const { repo, gap, tree, counts, missing, recent, recentMinutes } = result;
-  const scope = repo ?? 'all repos';
+  const { repo, gap, tree, counts, missing, recent, recentOmitted, recentMinutes } = result;
+  const scope = repo ? safeRepo(repo) : 'all repos';
 
   // The header carries the same signal the remember description does, at the same
   // moment it is being acted on. A brief that opens with a note count while the repo
@@ -471,9 +539,13 @@ export function renderBrief(result) {
   if (recent.length) {
     // Written as the reason rather than the rule, because the rule is already in the
     // skill and the model is being asked to apply it, not to learn it again.
+    // Bounded, and it says so. A bulk write or import stamps every note with the same
+    // minute; printing all of them would spend the context this brief exists to
+    // conserve, while reading as the whole list -- the exact failure the tree refuses.
+    const more = recentOmitted ? ` (+${recentOmitted} more)` : '';
     out.push(
       '',
-      `captured in the last ${recentMinutes} minutes, so already covered: ${recent.join(', ')}`,
+      `captured in the last ${recentMinutes} minutes, so already covered: ${recent.join(', ')}${more}`,
     );
   }
 
