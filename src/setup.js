@@ -201,13 +201,26 @@ export function unlinkSkills() {
 }
 
 /**
+ * Skills whose description `compact` regenerates from store state.
+ *
+ * `recall` advertises what the store knows. `remember` advertises what it is missing,
+ * which is the only form of that signal that reaches the model at the moment capture is
+ * worth doing — `captureGap` had computed it since 0.5 and sent it only to `doctor`, a
+ * command run by the one person who did not need telling.
+ *
+ * `handoff` is deliberately absent: it describes itself, and there is no store-derived
+ * state that would make its description more useful than the one it ships with.
+ */
+export const REGENERATED = ['recall', 'remember'];
+
+/**
  * Install into every agent present on this machine, then build the store.
  *
- * Only `recall` is registered for description regeneration. `compact` overwrites the
- * description of every path it is given, and handoff and remember describe
- * themselves; registering all three would replace two good descriptions with a third.
- * Copies and prompt files register their own path, because rewriting the packaged
- * original would never reach them.
+ * Only the skills in `REGENERATED` are registered, and `compact` now picks the text per
+ * skill rather than writing one digest to every path it is given. That is what makes
+ * registering a second skill safe; before it, doing so would have replaced a good
+ * description with a description of the wrong thing. Copies and prompt files register
+ * their own path, because rewriting the packaged original would never reach them.
  */
 export function setup({ compactFn } = {}) {
   const targets = installableTargets();
@@ -241,9 +254,11 @@ export function setup({ compactFn } = {}) {
   }
 
   const skillPaths = [
-    join(packagedSkillsDir(), 'recall', 'SKILL.md'),
-    ...copies.filter((c) => c.name === 'recall').map((c) => join(c.path, 'SKILL.md')),
-    ...installed.filter((i) => i.mode === 'prompt' && i.name === 'recall').map((i) => i.path),
+    ...REGENERATED.map((name) => join(packagedSkillsDir(), name, 'SKILL.md')),
+    ...copies.filter((c) => REGENERATED.includes(c.name)).map((c) => join(c.path, 'SKILL.md')),
+    ...installed
+      .filter((i) => i.mode === 'prompt' && REGENERATED.includes(i.name))
+      .map((i) => i.path),
   ];
   // Drop registrations whose file is gone before adding the current ones. Renaming
   // the checkout, moving it, or reinstalling under a different prefix each leave a

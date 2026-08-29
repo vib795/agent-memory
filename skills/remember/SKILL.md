@@ -79,6 +79,32 @@ most turns.
 
 ---
 
+## Step 0 — Read what is already known (ONE terminal call)
+
+```bash
+agent-memory brief
+```
+
+Read-only, safe on every shell including PowerShell, and it costs no request of its
+own — it rides inside the turn you are already answering.
+
+It answers three things you would otherwise guess at:
+
+- **What is already here.** Deduplication is by exact content, so the same claim in
+  different words becomes a second node. If the brief already lists it, either say
+  nothing or update that note by its id.
+- **Which ids are real.** An `edges[].dst` or `supersedes` pointing at an id you
+  invented is accepted and then silently never connects. Take targets from the brief.
+- **Which types are empty.** A store with no `constraint` has not recorded what the
+  environment forbids, which is the type that saves a future session a wasted retry.
+
+If the brief lists an id under "already covered", that juncture was captured minutes
+ago. Do not capture it again.
+
+Skip this step only when the user named exactly what to write and it is plainly new.
+
+---
+
 ## Step 1 — Select what is durable
 
 <!-- extraction-rules:start -->
