@@ -104,6 +104,7 @@ export const DEFAULTS = {
   compactThreshold: 10, // node-count delta that triggers an automatic compact
   briefRecentMinutes: 120, // window the capture brief calls already covered
   briefRecentIds: 10, // ids printed from that window before the rest are counted
+  collisionBodyChars: 500, // excerpt returned with a title collision, so one turn can fix it
 };
 
 // Written by the installer: every SKILL.md whose description compact regenerates.

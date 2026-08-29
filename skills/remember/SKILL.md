@@ -223,7 +223,15 @@ Then stop. Do not summarize the conversation.
 Warnings from `write` are worth surfacing verbatim:
 
 - `title collision` means an existing note reads as the same thing under a different
-  id. Tell the user which two, and offer to merge or link them with `contradicts`.
+  id. The warning now carries that note's type, title and body, so decide in **this
+  turn** — do not run `get` to fetch what you were already handed:
+  - **Same claim, better wording** — update the existing id with the fuller body. One
+    note, improved.
+  - **The claim changed** — set `supersedes` to the old id on your new note.
+  - **They genuinely disagree** — link them with `contradicts` and say so to the user.
+
+  Two notes making one claim is the thing compaction cannot repair for you: it merges
+  on identical content, and these are not identical, only synonymous.
 - `redacted Nx <kind>` means the guard caught something. Say what kind was caught so
   the user knows a secret was in play, never what the value was.
 
