@@ -400,6 +400,20 @@ function readNodesFrom(file) {
   return [raw];
 }
 
+/**
+ * A readable slice of a note body, cut on a boundary rather than mid-word.
+ *
+ * Enough to decide whether two notes make the same claim, and no more: this rides
+ * inside a `write` response, which is not the place to reproduce a 4 KB note.
+ */
+function clip(body, limit) {
+  const text = String(body ?? '').trim();
+  if (text.length <= limit) return { text, truncated: false };
+  const head = text.slice(0, limit);
+  const cut = Math.max(head.lastIndexOf('\n'), head.lastIndexOf(' '));
+  return { text: (cut > limit / 2 ? head.slice(0, cut) : head).trimEnd(), truncated: true };
+}
+
 function cmdWrite(opts) {
   const file = opts['from-json'];
   if (!file || file === true || (file !== '-' && !existsSync(file))) {
@@ -432,6 +446,8 @@ function cmdWrite(opts) {
 
   // Normalized titles of what already exists, so two agents naming one thing two
   // different ways surface as a collision instead of quietly becoming two nodes.
+  // Bodies are deliberately not loaded here: a collision is rare, and paying for every
+  // body in the store to describe the one that collided is the wrong trade.
   const titles = new Map();
   for (const row of db.prepare('SELECT id, title, content_hash FROM nodes').all()) {
     titles.set(normalizeTitle(row.title), { id: row.id, hash: row.content_hash });
@@ -440,6 +456,7 @@ function cmdWrite(opts) {
   const written = [];
   const failed = [];
   const warnings = [];
+  const collisions = [];
   for (const raw of incoming) {
     const node = { ...raw };
     node.source = node.source || (opts.source === true ? undefined : opts.source) || 'manual';
@@ -453,9 +470,25 @@ function cmdWrite(opts) {
     try {
       const res = writeNote(node, { selfEmail });
       if (collision && collision.id !== res.node.id) {
+        // The id alone forced a second turn: deciding whether this is a duplicate to
+        // merge or a genuine contradiction needs the other note's words, and fetching
+        // them meant another `get`, which on a per-prompt biller is another request.
+        // One row, and only when a collision actually happened.
+        const other = getNodeRow(db, collision.id);
+        const excerpt = other ? clip(other.body, cfg.collisionBodyChars) : null;
+        collisions.push({
+          id: res.node.id,
+          existing: collision.id,
+          existingType: other?.type ?? null,
+          existingTitle: other?.title ?? null,
+          existingArchived: Boolean(other?.archived),
+          excerpt: excerpt?.text ?? null,
+          truncated: Boolean(excerpt?.truncated),
+        });
         warnings.push(
-          `title collision: ${res.node.id} reads the same as existing ${collision.id}; ` +
-            'set contradicts or merge them',
+          `title collision: ${res.node.id} reads the same as existing ${collision.id}` +
+            (other ? ` [${other.type}] ${other.title}` : '') +
+            (other?.archived ? ' (archived)' : ''),
         );
       }
       written.push({
@@ -479,9 +512,18 @@ function cmdWrite(opts) {
   const compacted = maybeCompact(db, before, after, cfg);
   db.close();
 
+  // Printed under the warning and indented, so it reads as evidence rather than as a
+  // second instruction competing with the first.
+  const collisionLines = collisions.flatMap((c) => [
+    ...(c.excerpt ? c.excerpt.split('\n').map((l) => `    ${l}`) : []),
+    ...(c.truncated ? [`    ... agent-memory get ${c.existing} for the rest`] : []),
+    `    -> update ${c.existing} by id, or set supersedes or contradicts on ${c.id}.`,
+  ]);
+
   const text = [
     ...written.map((w) => `${w.created ? 'created' : 'updated'} ${w.id} [${w.type}]`),
     ...warnings.map((w) => `warning: ${w}`),
+    ...collisionLines,
     ...failed.map((f) => `failed ${f.id ?? '<no id>'}: ${f.errors.join('; ')}`),
     written.length ? '' : 'No nodes written.',
     compacted ? `compacted: ${compacted.indexed} notes indexed` : '',
@@ -489,7 +531,9 @@ function cmdWrite(opts) {
     .filter(Boolean)
     .join('\n');
 
-  return { ok: failed.length === 0, written, failed, warnings, compacted: !!compacted, text };
+  return {
+    ok: failed.length === 0, written, failed, warnings, collisions, compacted: !!compacted, text,
+  };
 }
 
 function cmdCompact() {

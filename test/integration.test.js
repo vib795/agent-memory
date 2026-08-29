@@ -1735,3 +1735,87 @@ test('a fractional cap cannot reach SQLite as a LIMIT', () => {
     saveConfig({ briefRecentIds: DEFAULTS.briefRecentIds });
   }
 });
+
+test('a title collision returns the other note, not just its id', () => {
+  // The id alone forced a second turn: deciding whether this is a duplicate to merge or
+  // a genuine contradiction needs the other note's words. Fetching them meant another
+  // `get`, and on a per-prompt biller that is another request for something the command
+  // already had in hand.
+  const home = mkdtempSync(join(tmpdir(), 'agent-memory-collide-'));
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const run = (args, input) =>
+    spawnSync(process.execPath, [cli, ...args], {
+      env: { ...process.env, AGENT_MEMORY_HOME: home }, input, encoding: 'utf8',
+    });
+  const body = 'Why: revocation had to take effect immediately.\nRejected: short-TTL JWT.';
+  try {
+    assert.equal(run(['init']).status, 0);
+    run(['write', '--from-json', '-'], JSON.stringify({
+      nodes: [{ id: 'use-sessions', type: 'decision', title: 'Chose server sessions over JWT', body }],
+    }));
+
+    // Same claim, different words and different id -- exactly what content-hash dedup
+    // cannot catch, because the bytes differ.
+    const r = run(['write', '--from-json', '-'], JSON.stringify({
+      nodes: [{ id: 'session-auth', type: 'decision', title: 'chose SERVER-SESSIONS over jwt!', body: 'We went with sessions.' }],
+    }));
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /title collision: session-auth reads the same as existing use-sessions/);
+    assert.match(r.stdout, /\[decision\] Chose server sessions over JWT/, 'the type and title come back');
+    assert.match(r.stdout, /revocation had to take effect immediately/, 'and the body, which is the point');
+    assert.match(r.stdout, /update use-sessions by id, or set supersedes or contradicts/);
+
+    const j = JSON.parse(run(['write', '--from-json', '-', '--json'], JSON.stringify({
+      nodes: [{ id: 'third-way', type: 'decision', title: 'CHOSE SERVER SESSIONS OVER JWT', body: 'x' }],
+    })).stdout);
+    assert.equal(j.collisions.length, 1);
+    assert.equal(j.collisions[0].existing, 'use-sessions');
+    assert.equal(j.collisions[0].existingType, 'decision');
+    assert.equal(j.collisions[0].truncated, false, 'a short body is returned whole');
+    assert.ok(j.collisions[0].excerpt.includes('short-TTL JWT'));
+
+    // Updating a note by its own id is not a collision with itself.
+    const same = JSON.parse(run(['write', '--from-json', '-', '--json'], JSON.stringify({
+      nodes: [{ id: 'use-sessions', type: 'decision', title: 'Chose server sessions over JWT', body: 'Revised.' }],
+    })).stdout);
+    assert.deepEqual(same.collisions, [], 'an update to the same id must stay silent');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a long collision body is clipped on a boundary and says where the rest is', () => {
+  const home = mkdtempSync(join(tmpdir(), 'agent-memory-clip-'));
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const run = (args, input) =>
+    spawnSync(process.execPath, [cli, ...args], {
+      env: { ...process.env, AGENT_MEMORY_HOME: home }, input, encoding: 'utf8',
+    });
+  try {
+    assert.equal(run(['init']).status, 0);
+    run(['write', '--from-json', '-'], JSON.stringify({
+      nodes: [{ id: 'long-note', type: 'system', title: 'A long one', body: 'Sentence explaining the mechanism. '.repeat(40) }],
+    }));
+    const j = JSON.parse(run(['write', '--from-json', '-', '--json'], JSON.stringify({
+      nodes: [{ id: 'long-dup', type: 'system', title: 'a LONG one', body: 'Shorter.' }],
+    })).stdout);
+
+    const c = j.collisions[0];
+    assert.equal(c.truncated, true);
+    assert.ok(c.excerpt.length <= DEFAULTS.collisionBodyChars, `excerpt was ${c.excerpt.length}`);
+    // Cut on a boundary: a body that stops mid-word reads as corrupted, which is the
+    // same reason the digest sheds whole items rather than trimming characters. The
+    // real property is that the excerpt is a prefix ending exactly where a word does.
+    const full = ('Sentence explaining the mechanism. '.repeat(40)).trim();
+    assert.ok(full.startsWith(c.excerpt), 'the excerpt must be a prefix of the body');
+    assert.match(full[c.excerpt.length], /\s/, 'and the next character must be whitespace');
+    assert.match(
+      run(['write', '--from-json', '-'], JSON.stringify({
+        nodes: [{ id: 'long-dup-2', type: 'system', title: 'A Long One', body: 'x' }],
+      })).stdout,
+      /agent-memory get long-note for the rest/,
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
