@@ -3,8 +3,8 @@
 How agent-memory is built, and why it is built that way.
 
 Every figure here was read from the source rather than written from memory, at
-v0.6.4: 15 modules, 3,574 lines of JavaScript, zero runtime dependencies and zero
-dev dependencies, 97 tests.
+v0.7.4: 15 modules, 4,168 lines of JavaScript, zero runtime dependencies and zero
+dev dependencies, 111 tests.
 
 ---
 
@@ -242,7 +242,7 @@ quietly ending.
 
 ---
 
-## Two-tier routing
+## Three-tier routing
 
 The expensive resource is not disk or CPU. It is the model's context window, and the
 premium request budget behind it.
@@ -472,22 +472,22 @@ The properties that must stay true. Each is covered by the test suite.
 
 | Module | Lines | Responsibility |
 |---|--:|---|
-| `cli.js` | 980 | 13 commands; one process, one answer |
+| `cli.js` | 1114 | 14 commands; one process, one answer |
+| `digest.js` | 559 | tiers 1 and 2: both descriptions, tree, brief |
+| `compact.js` | 372 | dedupe, supersede, decay, regenerate |
 | `index-db.js` | 317 | SQLite cache: DDL, reindex, FTS5 search |
+| `setup.js` | 297 | install into detected agent surfaces |
 | `pii.js` | 274 | export-time disclosure control |
 | `store.js` | 256 | notes as source of truth; frontmatter; atomic upsert |
-| `compact.js` | 283 | dedupe, supersede, decay, regenerate |
-| `setup.js` | 282 | install into detected agent surfaces |
 | `staleness.js` | 213 | commit-distance staleness and capture gap |
-| `digest.js` | 209 | two-tier routing: description + tree |
-| `config.js` | 191 | engagement resolution; two-file config split |
+| `config.js` | 197 | engagement resolution; two-file config split |
 | `targets.js` | 140 | where each agent looks for instructions |
 | `graph.js` | 99 | recursive CTE traversal + retrieval budget |
 | `schema.js` | 98 | validate and normalize; reports every problem |
 | `redact.js` | 97 | capture-time fail-closed secret redaction |
 | `promptfile.js` | 78 | VS Code prompt files derived from SKILL.md |
 | `atomic.js` | 57 | atomic write; imports nothing from this package |
-| **total** | **3,574** | zero dependencies, 97 tests |
+| **total** | **4,168** | zero dependencies, 111 tests |
 
 `atomic.js` deliberately imports nothing from the package: `store.js` already imports
 `config.js`, so putting the atomic write in either would create a cycle.

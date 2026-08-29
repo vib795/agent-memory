@@ -3,22 +3,25 @@ import { createHash } from 'node:crypto';
 import { captureGap, currentRepo } from './staleness.js';
 
 /**
- * Two-tier routing.
+ * Tiers 1 and 2 of a three-tier ladder.
  *
- * Tier 1 is the `recall` skill's description, which is loaded into every chat
- * whether or not memory is ever used. It is standing cost, so it has to read like
- * a description rather than a document.
+ * Tier 1 is a skill description, loaded into every chat whether or not memory is ever
+ * used. It is standing cost, so it has to read like a description rather than a
+ * document. It has two occupants, not one: `recall`'s description advertises what the
+ * store knows; `remember`'s advertises what it is missing. Both are the same mechanism
+ * — a line of frontmatter that code regenerates and every conversation loads —
+ * pointed at opposite halves of the same problem.
  *
- * Tier 2 is the tree, printed only when `recall` actually fires. Per-invocation
- * cost, paid once, and only when someone is already looking something up.
+ * Tier 2 is printed only when a skill actually fires: the tree for `recall`, the
+ * capture brief for `remember`. Per-invocation cost, paid once, and only when someone
+ * is already looking something up or about to write one down.
  *
- * Neither tier costs a premium request. A request is charged per prompt, not per
+ * Tier 3 — note bodies, and the colliding note that `write` hands back — lives
+ * outside this module, because by then the question is which note rather than which
+ * of them.
+ *
+ * Neither tier here costs a premium request. A request is charged per prompt, not per
  * tool call, so both of these ride inside a turn that was already paid for.
- *
- * Tier 1 has two occupants, not one. `recall`'s description advertises what the store
- * knows; `remember`'s advertises what it is missing. Both are the same mechanism — a
- * line of frontmatter that code regenerates and every conversation loads — pointed at
- * opposite halves of the same problem.
  */
 
 // Never dropped from either tier. A constraint is what stops an agent from burning
