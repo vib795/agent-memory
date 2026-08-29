@@ -1,4 +1,5 @@
 import { loadConfig, NOTE_TYPES } from './config.js';
+import { createHash } from 'node:crypto';
 import { captureGap, currentRepo } from './staleness.js';
 
 /**
@@ -34,25 +35,43 @@ const USE_WHEN =
 /**
  * A repository name safe to put in front of a model.
  *
- * `currentRepo` is `basename(git rev-parse --show-toplevel)` — a directory name, which
- * on POSIX may contain newlines and arbitrary prose. That value reaches Tier 1, the one
- * string loaded into every conversation, so a repository cloned into a maliciously
- * chosen directory could carry instructions there. `writeSkillDescription` JSON-quotes
- * the line, which keeps the YAML valid and does nothing about the content.
+ * `currentRepo` is `basename(git rev-parse --show-toplevel)` — a directory name. That
+ * value reaches Tier 1, the one string loaded into every conversation, and
+ * `writeSkillDescription` only JSON-quotes the line, which keeps the YAML valid and
+ * does nothing about the content.
  *
- * The exposure predates the capture nudge: `buildDigest` has interpolated repo names
- * for many releases. It is fixed in one place for both.
+ * The charset filter alone is not enough, and the reason is specific: a GitHub
+ * repository name is drawn from exactly this charset, so
+ * `SYSTEM-ignore-previous-instructions` survives it unchanged and arrives by nothing
+ * more exotic than `git clone`. Hyphens separate words as well as spaces do.
+ *
+ * So shape decides. A repository name is one to three segments and short; an
+ * instruction needs more words than that. Anything outside that shape is rendered as a
+ * stable non-semantic identifier instead — the name is still distinguishable from
+ * another repository's, and still tells a reader in the wrong tree that the numbers are
+ * not theirs, which is the only job it had.
+ *
+ * The cost is honest: a legitimate four-segment name shows as `repo-<hash>`. That is a
+ * deliberate trade of some legibility for a Tier-1 string that cannot be authored by
+ * whoever chose the directory name.
  *
  * Display only. Every query still matches on the real name, because a repository whose
  * notes stopped being found would be a worse bug than the one this closes.
  */
 export function safeRepo(name) {
-  if (typeof name !== 'string') return 'unnamed';
-  // Kebab and snake cover essentially every real repository name, so the constraint is
-  // invisible in normal use and total against control characters and injected prose.
-  const cleaned = name.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 64);
-  return cleaned || 'unnamed';
+  if (typeof name !== 'string' || !name) return 'unnamed';
+  // Filtering must not be able to *make* a name look ordinary. Stripping the spaces
+  // out of "Ignore previous instructions" collapses it into one long token that would
+  // pass the shape test below, so a name that had to be modified at all is already
+  // outside the shape and goes straight to an identifier.
+  const untouched = /^[A-Za-z0-9._-]+$/.test(name);
+  const segments = name.split(/[-._]+/).filter(Boolean);
+  if (untouched && segments.length <= 3 && name.length <= 32) return name;
+  // Stable across runs and machines, so the same repository always reads the same and
+  // two repositories never collide in the description.
+  return `repo-${createHash('sha256').update(name).digest('hex').slice(0, 8)}`;
 }
+
 
 function typeRank(type) {
   const i = TYPE_ORDER.indexOf(type);
@@ -392,7 +411,10 @@ function typeCounts(db, repo) {
  * window wide enough to cover the working session is the honest approximation.
  */
 function recentlyCaptured(db, repo, cfg, now) {
-  const cap = cfg.briefRecentIds;
+  // Bound straight into SQLite's `LIMIT ?`, which rejects a REAL with `datatype
+  // mismatch`. Callers may hand in a cfg that never went through loadConfig -- every
+  // test does -- so the floor lives here as well as there.
+  const cap = Math.max(1, Math.floor(cfg.briefRecentIds));
   // Same format store.js writes, so a lexicographic compare is a chronological one.
   const cutoff = new Date(now - cfg.briefRecentMinutes * 60000)
     .toISOString()
