@@ -349,11 +349,12 @@ lives under `~/.agents/memory`, nothing is written into the projects you point i
 at, and there is no per-repo setup step. `cd` between projects freely: the store
 does not move, split, or reset.
 
-One exception, and it is this repository rather than yours: if you installed from a
-clone, `npm install -g .` symlinks rather than copies, so `compact` regenerating the
-skill descriptions lands in your working tree and `skills/recall/SKILL.md` shows as
-modified. That is generated state, and [From a clone](#from-a-clone) says so. No
-project repository is ever written to.
+One note, and it is about this repository rather than yours: if you installed from a
+clone, `npm install -g .` symlinks rather than copies, so the skill links resolve back
+into your working tree. `compact` detects that and refuses to write there — the files
+are tracked, and one developer's note count committed and published is exactly what
+happened for twenty releases. It reports them as skipped instead. No project repository
+is ever written to.
 
 What the working directory changes is *scope*, never location.
 
@@ -366,6 +367,7 @@ What the working directory changes is *scope*, never location.
 | `search` | whole store | nothing — full text hits every note in every repo |
 | `get` | whole store | the staleness line only; the note is found by id either way |
 | `tree` | whole store | **filters it** — defaults to the current repo |
+| `brief` | whole store | **filters it** — the same scoping as `tree` |
 | `write` | whole store | **is stamped into the note** — see below |
 
 The current repo is `git rev-parse --show-toplevel` reduced to its directory name.
@@ -403,6 +405,7 @@ Only `init` is a once-per-machine command, and `agent-memory setup` already ran 
 | `init` | once, via `setup`. Again only to register extra skill paths |
 | `write` | every capture |
 | `tree`, `get`, `search` | every lookup |
+| `brief` | every capture, before `write` — what is already known here |
 | `index` | repair only — `write` reindexes on every call. Run it after hand-editing or deleting notes, or after deleting `index.db` |
 | `compact` | occasionally. Nothing schedules it: no daemon, no cron, no hook |
 | `doctor` | after install, after an upgrade, and whenever something looks wrong |
@@ -550,14 +553,15 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 # Windows
 Both are thin wrappers over `agent-memory setup`; the linking logic lives in
 `src/setup.js` so there is one implementation rather than three that drift.
 
-Note that `npm install -g .` from a clone *symlinks* rather than copies, so
-`compact` regenerates the description in your working tree and
-`skills/recall/SKILL.md` will show as modified. That is expected — the description
-is generated state, and the committed value is only a placeholder.
+Note that `npm install -g .` from a clone *symlinks* rather than copies, so the skill
+links point back into your working tree. `compact` will not regenerate a description
+there — `skills/recall/SKILL.md` and `skills/remember/SKILL.md` are tracked files, and
+their committed descriptions are deliberately generic placeholders. `compact` prints
+them as skipped, which is the intended outcome, not a failure.
 
 Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old.
 
-Run `npm test` for the suite (91 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (105 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 

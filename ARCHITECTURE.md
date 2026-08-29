@@ -250,7 +250,8 @@ premium request budget behind it.
 ```mermaid
 flowchart TB
     subgraph t1["TIER 1 — standing cost, every chat"]
-        D["recall skill description<br/>≤ 400 chars<br/>'Durable project knowledge: 5 notes, 1 constraint<br/>across agent-memory. Topics: … Use when …'"]
+        D["recall description<br/>≤ 400 chars — what the store knows<br/>'Durable project knowledge: 5 notes, 1 constraint<br/>across agent-memory. Topics: … Use when …'"]
+        R["remember description<br/>≤ 400 chars — what it is missing<br/>'340 commits since anything was captured<br/>for agent-memory. Use when …'"]
     end
     subgraph t2["TIER 2 — per-invocation, only when recall fires"]
         TR["routing tree<br/>≤ 80 lines<br/>type · id · title, ordered by<br/>constraint-first then degree"]
@@ -266,13 +267,27 @@ flowchart TB
 ```
 
 Tier 1 is loaded into every chat whether or not memory is ever used, so it has to read
-like a description rather than a document. It is composed from constraint count, then
-repos by note count, then topics by edge degree — and on overflow it sheds the
+like a description rather than a document. `recall`'s is composed from constraint count,
+then repos by note count, then topics by edge degree — and on overflow it sheds the
 lowest-degree topics first, then repos, **one whole item at a time**. Cutting mid-word
 would leave the description looking corrupted, which is worse than saying less.
 
 Two pieces are structural and never dropped: the constraint count, and the closing
 "use when" clause — which is the entire reason an agent decides to invoke at all.
+
+**Tier 1 has two occupants.** `recall`'s description advertises what the store knows;
+`remember`'s advertises what it is missing. The second is `captureGap` — the distance
+in commits from HEAD to the nearest capture, which the store has always been able to
+compute — routed to the one surface that is loaded at the moment capture is worth
+doing. Before 0.7 it went only to `doctor`, a command run by the person who least
+needed telling.
+
+It is written as a *state*, never as an instruction: "340 commits since anything was
+captured here" is a fact the model can weigh against what just happened in the
+conversation, where "remember to capture things" is wallpaper it stops seeing. Code
+supplies the timing signal; the model still decides whether anything durable happened.
+On a covered repository it goes quiet and simply reports the count — a line that nags
+at a current store teaches the reader to discount it before the day it matters.
 
 Neither tier costs a premium request. A request is charged per prompt, not per tool
 call, so both ride inside a turn that was already paid for.

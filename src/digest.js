@@ -1,4 +1,5 @@
-import { loadConfig } from './config.js';
+import { loadConfig, NOTE_TYPES } from './config.js';
+import { captureGap, currentRepo } from './staleness.js';
 
 /**
  * Two-tier routing.
@@ -12,6 +13,11 @@ import { loadConfig } from './config.js';
  *
  * Neither tier costs a premium request. A request is charged per prompt, not per
  * tool call, so both of these ride inside a turn that was already paid for.
+ *
+ * Tier 1 has two occupants, not one. `recall`'s description advertises what the store
+ * knows; `remember`'s advertises what it is missing. Both are the same mechanism — a
+ * line of frontmatter that code regenerates and every conversation loads — pointed at
+ * opposite halves of the same problem.
  */
 
 // Never dropped from either tier. A constraint is what stops an agent from burning
@@ -126,6 +132,111 @@ export function buildDigest(db, { cfg = loadConfig() } = {}) {
   return out;
 }
 
+// The routing clause for `remember`, and the mirror of USE_WHEN. It carries both the
+// asked form and the unasked one, because the unasked one is the entire reason this
+// description is regenerated at all: a memory that only grows when someone remembers
+// to grow it stays thin. Never dropped, for the same reason USE_WHEN is never dropped.
+const CAPTURE_WHEN =
+  'Use when the user says remember this, save this or note this down — and invoke it ' +
+  'unasked the moment a decision settles, a constraint surfaces, a root cause is ' +
+  'found or a convention is agreed.';
+
+const NUDGE_GENERIC = 'Capture durable project knowledge into a cross-repo memory graph.';
+
+/**
+ * Notes that speak for this repository, counted the way `captureGap` scopes them.
+ *
+ * A node with no repos is global and applies everywhere, so it counts here; a node
+ * claiming other repos does not. This mirrors `captureGap`'s filter deliberately —
+ * two different answers to "does this note cover me" in one description would be a
+ * bug the reader could see.
+ */
+function repoScopedCount(db, repo, type = null) {
+  // Bound in SQL order: the type predicate precedes the repo one in the statement.
+  return db
+    .prepare(`
+      SELECT COUNT(*) AS c
+        FROM nodes n
+       WHERE n.archived = 0 ${type ? 'AND n.type = ?' : ''}
+         AND (NOT EXISTS (SELECT 1 FROM node_repos r WHERE r.node_id = n.id)
+              OR EXISTS (SELECT 1 FROM node_repos r WHERE r.node_id = n.id AND r.repo = ?))
+    `)
+    .get(...(type ? [type, repo] : [repo])).c;
+}
+
+/**
+ * Tier 1, second occupant: the `remember` skill description.
+ *
+ * `captureGap` has known since 0.5 how far a repository has moved with nothing written
+ * down in it, and that answer went only to `doctor` — a command a person runs on
+ * purpose, which is precisely the person who did not need telling. The signal never
+ * reached the one reader who could act on it mid-conversation. This routes it to the
+ * surface that is already loaded into every turn.
+ *
+ * Written as a *state*, never as an instruction. "340 commits since anything was
+ * captured here" is a fact the model can weigh against what just happened in the
+ * conversation; "remember to capture things" is wallpaper it stops seeing by the third
+ * turn. The distinction is the whole design: code supplies the timing signal, the model
+ * still decides whether anything durable actually happened.
+ *
+ * It goes quiet on a covered repository. A description that nags at a store which is
+ * already current teaches the reader to discount the line, and then it is worth nothing
+ * on the day it has something to say.
+ *
+ * Scoping caveat, stated because it is visible in the output: the gap is per repository
+ * and `compact` runs wherever the user happens to be, so this describes the repo where
+ * compaction last ran. That is why every variant names the repo out loud — a reader in
+ * a different tree can see the mismatch rather than act on a number that is not theirs.
+ * `maybeCompact` re-points it on the next write, so it self-corrects with use.
+ */
+export function buildCaptureNudge(db, { cfg = loadConfig(), cwd = process.cwd(), repo, gap } = {}) {
+  const g = gap !== undefined ? gap : captureGap(db, { cwd, cfg, repo });
+
+  const compose = (head) => {
+    const out = head ? `${head} ${CAPTURE_WHEN}` : `${NUDGE_GENERIC} ${CAPTURE_WHEN}`;
+    // Nothing here is a list, so there is no elastic middle to shed one item at a
+    // time. Over the cap, drop the whole head rather than truncate mid-sentence: a
+    // description that stops in the middle of a number reads as corrupted, and the
+    // routing clause is the part that must survive either way.
+    return out.length > cfg.digestChars ? `${NUDGE_GENERIC} ${CAPTURE_WHEN}` : out;
+  };
+
+  // Outside a repository there is no gap to report and no repo to name. Say what the
+  // skill is for and stop, rather than inventing a number.
+  if (!g) return compose(null);
+
+  // Never captured in this repository. `captureGap` counts only notes carrying a
+  // `captured_sha`, so this is its answer to "has anyone written anything down here",
+  // and the commit branches below stay on that same definition. The broader count is
+  // reserved for the covered branches, where the question is how much knowledge applies
+  // here rather than how much of it was captured here.
+  if (g.notes === 0) {
+    // captureGap withholds its note on a repository too young for the absence to mean
+    // anything. Stay silent with it: nagging on commit three is how a signal gets
+    // discounted long before the day it matters.
+    return compose(
+      g.note ? `Nothing has ever been captured for ${g.repo} — ${g.commits} commits of history.` : null,
+    );
+  }
+
+  // Captured, but the repository has moved a long way since the most recent one.
+  if (g.note) return compose(`${g.commits} commits since anything was captured for ${g.repo}.`);
+
+  // Current on commits, but blind in the type that matters most. `digest` privileges
+  // constraints and never drops them from Tier 1; a store holding none has not recorded
+  // the thing most likely to save a future session a wasted retry loop.
+  const notes = repoScopedCount(db, g.repo);
+  if (repoScopedCount(db, g.repo, PRIVILEGED) === 0) {
+    return compose(
+      `${notes} note${notes === 1 ? '' : 's'} for ${g.repo} and no constraint recorded — ` +
+        'what this environment forbids has never been written down.',
+    );
+  }
+
+  // Covered. Report the state plainly and let the routing clause do the rest.
+  return compose(`${notes} note${notes === 1 ? '' : 's'} for ${g.repo}, capture is current.`);
+}
+
 /**
  * Tier 2: the routing tree, scoped.
  *
@@ -205,5 +316,169 @@ export function renderTree(result) {
   // The map is what recall reads before answering, so it is where a thin graph has to
   // admit that it is thin. A short list and a silent footer read as full coverage.
   if (result.gap?.note) out.push(result.gap.note);
+  return out.join('\n');
+}
+
+/**
+ * What each type is for, shown only where one is missing.
+ *
+ * Taken from the table in the remember skill so there is one wording, not two that
+ * drift. Printed against a zero count it answers the question the count raises: not
+ * "you have none of these" but "here is what one would have said".
+ */
+const TYPE_HINT = {
+  constraint: 'what the environment or the org forbids',
+  decision: 'what was chosen, why, and what was rejected',
+  convention: 'how this codebase does something, and the gotcha',
+  system: 'how a thing works, anchored to a path:line',
+};
+
+/** Notes per type under the same scoping the tree uses, zeros included. */
+function typeCounts(db, repo) {
+  const rows = repo
+    ? db
+        .prepare(`
+          SELECT n.type AS type, COUNT(DISTINCT n.id) AS c
+            FROM nodes n
+            LEFT JOIN node_repos r ON r.node_id = n.id
+           WHERE n.archived = 0 AND (n.scope = 'global' OR r.repo = ?)
+           GROUP BY n.type
+        `)
+        .all(repo)
+    : db.prepare('SELECT type, COUNT(*) AS c FROM nodes WHERE archived = 0 GROUP BY type').all();
+
+  // Seeded from NOTE_TYPES so a type with no rows reports 0 rather than going absent.
+  // The absent ones are the entire point of this section.
+  const counts = new Map(NOTE_TYPES.map((t) => [t, 0]));
+  for (const r of rows) counts.set(r.type, r.c);
+  return counts;
+}
+
+/**
+ * Ids written recently enough that capturing them again would be a duplicate.
+ *
+ * The skill already forbids re-capturing a juncture that came up twice in one
+ * conversation, and that rule currently depends on the model remembering across a
+ * long turn. This makes it data instead.
+ *
+ * Recency is a proxy and is labelled as one: the CLI has no notion of a session, and
+ * inventing one would mean tracking state this tool deliberately does not keep. A
+ * window wide enough to cover the working session is the honest approximation.
+ */
+function recentlyCaptured(db, repo, cfg, now) {
+  // Same format store.js writes, so a lexicographic compare is a chronological one.
+  const cutoff = new Date(now - cfg.briefRecentMinutes * 60000)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, 'Z');
+  const rows = repo
+    ? db
+        .prepare(`
+          SELECT DISTINCT n.id AS id, n.updated AS updated
+            FROM nodes n
+            LEFT JOIN node_repos r ON r.node_id = n.id
+           WHERE n.archived = 0 AND n.updated >= ? AND (n.scope = 'global' OR r.repo = ?)
+           ORDER BY n.updated DESC, n.id
+        `)
+        .all(cutoff, repo)
+    : db
+        .prepare(`
+          SELECT id, updated FROM nodes
+           WHERE archived = 0 AND updated >= ? ORDER BY updated DESC, id
+        `)
+        .all(cutoff);
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Tier 2 of the capture pipeline: what `remember` reads before it composes.
+ *
+ * The mirror of `buildTree`, scoped for a writer rather than a reader. Without it the
+ * skill composes blind, and blind composition has three failure modes this answers
+ * directly: it rewords a note that already exists (dedup is by exact content hash, so
+ * a paraphrase becomes a second node), it invents an `edges[].dst` id that never
+ * connects because a missing dst is legal, and it cannot see which type the store is
+ * missing at the one moment it is about to write something.
+ *
+ * One call, inside a turn that was already paid for. That economy is why the brief is
+ * a command the skill runs rather than anything loaded standing — and it matters more
+ * on Copilot, where a second round trip is a second premium request.
+ *
+ * The list is `buildTree`'s, deliberately: two answers to "which notes speak for this
+ * repo" in one tool would be a bug the reader could see.
+ */
+export function buildBrief(db, { repo, cwd = process.cwd(), cfg = loadConfig(), gap, now = Date.now() } = {}) {
+  const here = repo === undefined ? currentRepo(cwd) : repo;
+  const g = gap !== undefined ? gap : here ? captureGap(db, { cwd, cfg, repo: here }) : null;
+  const tree = buildTree(db, { repo: here, cfg });
+  const counts = typeCounts(db, here);
+
+  return {
+    repo: here,
+    gap: g,
+    tree,
+    counts: Object.fromEntries(counts),
+    missing: NOTE_TYPES.filter((t) => counts.get(t) === 0),
+    recent: recentlyCaptured(db, here, cfg, now),
+    recentMinutes: cfg.briefRecentMinutes,
+    total: tree.total,
+  };
+}
+
+export function renderBrief(result) {
+  const { repo, gap, tree, counts, missing, recent, recentMinutes } = result;
+  const scope = repo ?? 'all repos';
+
+  // The header carries the same signal the remember description does, at the same
+  // moment it is being acted on. A brief that opens with a note count while the repo
+  // has moved 300 commits since anyone wrote anything is burying its own headline.
+  // Composed from the gap fields rather than reusing \`gap.note\` verbatim: that string
+  // names the repo, and the header already has, so borrowing it stutters.
+  const state = !repo
+    ? `${tree.total} notes in the store`
+    : gap?.note && gap.notes === 0
+      ? `nothing captured here yet, over ${gap.commits} commits of history`
+      : gap?.note
+        ? `${gap.commits} commits since anything was captured here`
+        : `${tree.total} note${tree.total === 1 ? '' : 's'} here, capture is current`;
+  const out = [`# capture brief: ${scope} — ${state}`];
+
+  if (tree.lines.length) {
+    out.push('', 'already known here — write the gap, not these');
+    const width = tree.lines.reduce((w, e) => Math.max(w, e.id.length), 0);
+    for (const e of tree.lines) {
+      out.push(`${e.type.padEnd(10)} ${e.id.padEnd(width)}  ${e.title}${e.archived ? ' (archived)' : ''}`);
+    }
+    // Never silent. A truncated list that reads as the whole store is how a duplicate
+    // gets written against a note that was there the entire time.
+    if (tree.omitted.length) {
+      out.push(`${tree.omitted.length} more not shown, run agent-memory tree --all`);
+    }
+    out.push('', 'These ids are real. Use them as an `edges[].dst` or `supersedes` target;');
+    out.push('an id you invent is accepted and then never connects to anything.');
+  }
+
+  if (missing.length) {
+    out.push('', 'nothing captured yet in these types');
+    const width = missing.reduce((w, t) => Math.max(w, t.length), 0);
+    for (const t of missing) out.push(`  ${t.padEnd(width)}  ${TYPE_HINT[t]}`);
+  }
+
+  const present = Object.entries(counts).filter(([, c]) => c > 0);
+  if (present.length) {
+    out.push('', `counts: ${present.map(([t, c]) => `${t} ${c}`).join(', ')}`);
+  }
+
+  if (recent.length) {
+    // Written as the reason rather than the rule, because the rule is already in the
+    // skill and the model is being asked to apply it, not to learn it again.
+    out.push(
+      '',
+      `captured in the last ${recentMinutes} minutes, so already covered: ${recent.join(', ')}`,
+    );
+  }
+
+  if (!tree.lines.length && !recent.length) {
+    out.push('', 'The store holds nothing for this repository yet. Anything durable is new.');
+  }
   return out.join('\n');
 }

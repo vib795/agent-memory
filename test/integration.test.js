@@ -13,12 +13,14 @@ const ROOT = mkdtempSync(join(tmpdir(), 'agent-memory-int-'));
 process.env.AGENT_MEMORY_HOME = ROOT;
 process.on('exit', () => rmSync(ROOT, { recursive: true, force: true }));
 
-const { writeNote, listNotes, notePath, readNote } = await import('../src/store.js');
+const { writeNote, listNotes, notePath, readNote, archiveNote } = await import('../src/store.js');
 const idx = await import('../src/index-db.js');
 const { searchNodes } = idx;
 const { neighborhood, applyBudget } = await import('../src/graph.js');
-const { buildTree, buildDigest, renderTree } = await import('../src/digest.js');
-const { compact, writeSkillDescription, insideCheckout } = await import('../src/compact.js');
+const { buildTree, buildDigest, buildCaptureNudge, renderTree, buildBrief, renderBrief } =
+  await import('../src/digest.js');
+const { compact, writeSkillDescription, insideCheckout, skillNameFromPath } =
+  await import('../src/compact.js');
 const stale = await import('../src/staleness.js');
 const { setup, unlinkSkills, danglingSkillLinks, skillTargets, packagedSkillsDir, SKILLS } =
   await import('../src/setup.js');
@@ -351,6 +353,142 @@ test('compact regenerates ROUTING.md and the registered skill description', () =
   assert.ok(written.includes('# body'), 'the body below the frontmatter is untouched');
   assert.ok(existsSync(paths.routing));
   assert.ok(readFileSync(paths.routing, 'utf8').includes('auth-service'));
+});
+
+// --- capture nudge (Tier 1, second occupant) -----------------------------------
+
+test('the capture nudge reports store state and always keeps its routing clause', () => {
+  // The whole point of regenerating this line is that it changes. A description that
+  // reads the same on an empty store and a covered one is wallpaper, and wallpaper is
+  // what the model stops seeing by the third turn.
+  const repo = mkdtempSync(join(tmpdir(), 'agent-memory-nudge-'));
+  const git = (...args) =>
+    execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'Test');
+  const commit = (n) => {
+    writeFileSync(join(repo, 'a.txt'), `v${n}`, 'utf8');
+    git('add', '.');
+    git('commit', '-qm', `c${n}`);
+  };
+  commit(0);
+  const first = git('rev-parse', 'HEAD');
+
+  const name = basename(repo);
+  const db = seed();
+  const cfg = { ...DEFAULTS, captureGapCommits: 10 };
+  const nudge = () => buildCaptureNudge(db, { cwd: repo, cfg, repo: name });
+  const ROUTING = /Use when the user says remember this/;
+
+  try {
+    stale.resetCache();
+
+    // A young repo with nothing captured stays quiet, exactly as captureGap does.
+    // Silence here is a claim that there is nothing to act on, so it has to be earned.
+    assert.doesNotMatch(nudge(), /commits/, 'must not nag on a three-commit repo');
+    assert.match(nudge(), ROUTING, 'the routing clause ships in every variant');
+
+    for (let i = 1; i <= 15; i++) commit(i);
+    stale.resetCache();
+    assert.match(nudge(), /Nothing has ever been captured for .* — 16 commits of history\./);
+
+    // Captured once, long ago. The number is the distance to the nearest capture.
+    writeNote({
+      id: 'nudge-note', type: 'system', title: 'Captured once', body: 'Long ago.',
+      repos: [name], captured_sha: first,
+    });
+    idx.reindex(db);
+    stale.resetCache();
+    assert.match(nudge(), /15 commits since anything was captured for /);
+
+    // Current on commits. seed() carries a global constraint, which applies to every
+    // repo, so the covered branch is what should speak here.
+    writeNote({
+      id: 'nudge-note-2', type: 'system', title: 'Captured now', body: 'Current.',
+      repos: [name], captured_sha: git('rev-parse', 'HEAD'),
+    });
+    idx.reindex(db);
+    stale.resetCache();
+    assert.match(nudge(), /capture is current\./);
+    assert.doesNotMatch(nudge(), /no constraint recorded/);
+
+    // Covered on commits but holding no constraint: the type the digest privileges and
+    // never drops, and the one that stops a future session repeating a blocked approach.
+    archiveNote('constraint', 'no-external-db');
+    idx.reindex(db);
+    stale.resetCache();
+    assert.match(nudge(), /no constraint recorded — what this environment forbids/);
+    assert.match(nudge(), ROUTING);
+
+    // Outside a repository there is no gap and no repo to name. Say what the skill is
+    // for rather than inventing a number about a tree we are not in.
+    const outside = buildCaptureNudge(db, { cfg, gap: null });
+    assert.doesNotMatch(outside, /commits|notes? for/);
+    assert.match(outside, ROUTING);
+
+    // Standing context cost, same ceiling as the digest.
+    for (const text of [nudge(), outside]) {
+      assert.ok(text.length <= cfg.digestChars, `nudge was ${text.length} chars`);
+    }
+  } finally {
+    db.close();
+    rmSync(repo, { recursive: true, force: true });
+    stale.resetCache();
+  }
+});
+
+test('compact writes the nudge to remember and the digest to recall', () => {
+  // One text used to go to every registered path, which is why only recall could be
+  // registered. Sending remember the digest would describe the wrong thing entirely.
+  seed().close();
+  const dir = mkdtempSync(join(tmpdir(), 'agent-memory-two-'));
+  const frontmatter = (n) => `---\nname: ${n}\ndescription: placeholder\n---\n\n# body\n`;
+  const recall = join(dir, 'recall', 'SKILL.md');
+  const remember = join(dir, 'remember', 'SKILL.md');
+  const prompt = join(dir, 'remember.prompt.md');
+  for (const p of [recall, remember]) mkdirSync(join(p, '..'), { recursive: true });
+  writeFileSync(recall, frontmatter('recall'), 'utf8');
+  writeFileSync(remember, frontmatter('remember'), 'utf8');
+  writeFileSync(prompt, frontmatter('remember'), 'utf8');
+
+  try {
+    const r = compact({ cfg: { ...DEFAULTS, skillPaths: [recall, remember, prompt] } });
+    assert.notEqual(r.digest, r.nudge, 'the two descriptions must not be the same text');
+    assert.equal(r.nudgeChars, r.nudge.length);
+
+    assert.ok(readFileSync(recall, 'utf8').includes(`description: ${JSON.stringify(r.digest)}`));
+    assert.ok(readFileSync(remember, 'utf8').includes(`description: ${JSON.stringify(r.nudge)}`));
+    // Both install layouts route by name, so a Copilot prompt file gets it too.
+    assert.ok(readFileSync(prompt, 'utf8').includes(`description: ${JSON.stringify(r.nudge)}`));
+    assert.ok(readFileSync(remember, 'utf8').includes('# body'), 'the body is untouched');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('skillNameFromPath reads both install layouts and rejects neither-shape', () => {
+  // Derived from the path rather than stored beside it: setup creates these two shapes
+  // and nothing else, so the layout is already the answer and a second source of truth
+  // about which skill is which would be one more thing to drift.
+  assert.equal(skillNameFromPath(join('a', 'b', 'remember', 'SKILL.md')), 'remember');
+  assert.equal(skillNameFromPath(join('a', 'b', 'recall', 'SKILL.md')), 'recall');
+  assert.equal(skillNameFromPath(join('a', 'prompts', 'remember.prompt.md')), 'remember');
+  assert.equal(skillNameFromPath(join('a', 'ROUTING.md')), null);
+});
+
+test('the shipped remember description is generic, not one machine capture gap', () => {
+  // The same backstop recall has. This description is regenerated on install, so the
+  // one in the repo is what every reader gets before their first compact -- and a note
+  // count or a commit distance in it is a false claim about a store they do not have.
+  const skill = fileURLToPath(new URL('../skills/remember/SKILL.md', import.meta.url));
+  const m = readFileSync(skill, 'utf8').match(/^description: (.*)$/m);
+  assert.ok(m, 'remember must carry a description');
+  const d = m[1];
+
+  assert.doesNotMatch(d, /\d+ notes?\b/, 'note counts describe one machine, not the reader');
+  assert.doesNotMatch(d, /\d+ commits?\b/, 'a commit distance is one machine, not the reader');
+  assert.match(d, /remember this/, 'the routing triggers must ship');
 });
 
 test('writeSkillDescription refuses a file without frontmatter', () => {
@@ -694,18 +832,21 @@ test('a VS Code install gets prompt files, generated from the skills', () => {
   }
 });
 
-test('setup registers recall and nothing else', () => {
+test('setup registers recall and remember, and never handoff', () => {
   seed().close();
   const home = mkdtempSync(join(tmpdir(), 'agent-memory-home-'));
   process.env.AGENT_MEMORY_SKILLS_HOME = home;
   try {
     saveConfig({ skillPaths: [] });
     const r = setup({});
-    // compact overwrites the description of every registered path. handoff and
-    // remember describe themselves, so registering them would destroy both.
-    assert.deepEqual(r.skillPaths, [join(packagedSkillsDir(), 'recall', 'SKILL.md')]);
+    // Both are Tier 1 and both are regenerated from store state: recall advertises what
+    // the store knows, remember what it is missing. handoff describes itself and has no
+    // store-derived state, so registering it would destroy a good description.
+    assert.deepEqual(r.skillPaths, [
+      join(packagedSkillsDir(), 'recall', 'SKILL.md'),
+      join(packagedSkillsDir(), 'remember', 'SKILL.md'),
+    ]);
     assert.ok(!JSON.stringify(loadConfig().skillPaths).includes('handoff'));
-    assert.ok(!JSON.stringify(loadConfig().skillPaths).includes('remember'));
   } finally {
     delete process.env.AGENT_MEMORY_SKILLS_HOME;
     rmSync(home, { recursive: true, force: true });
@@ -726,7 +867,10 @@ test('setup forgets a registered skill whose file is gone', () => {
     setup({});
     const after = loadConfig().skillPaths;
     assert.ok(!after.includes(dead), `stale path survived: ${JSON.stringify(after)}`);
-    assert.deepEqual(after, [join(packagedSkillsDir(), 'recall', 'SKILL.md')]);
+    assert.deepEqual(after, [
+      join(packagedSkillsDir(), 'recall', 'SKILL.md'),
+      join(packagedSkillsDir(), 'remember', 'SKILL.md'),
+    ]);
   } finally {
     delete process.env.AGENT_MEMORY_SKILLS_HOME;
     rmSync(home, { recursive: true, force: true });
@@ -1326,6 +1470,113 @@ test('export removes personal identifiers and says what it removed', () => {
     assert.match(doc.redaction.semanticReviewRequired, /Names/);
     // stderr carries the receipt so a person piping the document still sees it.
     assert.match(out.stderr, /rule set: pii\/v1/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// --- capture brief (Tier 2 of the capture pipeline) -----------------------------
+
+test('the brief shows real ids, the empty types, and what was just captured', () => {
+  // Without this the skill composes blind, and blind composition reworded a note that
+  // already existed into a second node -- dedup is by exact content hash, so a
+  // paraphrase is not caught.
+  const db = seed();
+  try {
+    // Well past the recency window, so seed()'s notes are history rather than
+    // duplicates-in-waiting. A clock near today would put them inside it.
+    const now = Date.parse('2027-01-01T00:00:00Z');
+    const b = buildBrief(db, { repo: 'repo-a', gap: null, now });
+    const text = renderBrief(b);
+
+    // Real ids, so an edges[].dst can point at something that exists. A missing dst is
+    // legal and simply never connects, which is why guessing one is worse than silence.
+    assert.match(text, /auth-service/);
+    assert.match(text, /no-external-db/);
+    assert.match(text, /edges\[\]\.dst/, 'the brief has to say why the ids are there');
+
+    // seed() holds system, decision and constraint -- convention is the gap.
+    assert.deepEqual(b.missing, ['convention']);
+    assert.match(text, /nothing captured yet in these types/);
+    assert.match(text, /convention {2}how this codebase does something/);
+    assert.doesNotMatch(text, /^ {2}system /m, 'a type that exists is not listed as missing');
+
+    assert.deepEqual(b.recent, [], 'notes older than the window are not called recent');
+    assert.doesNotMatch(text, /already covered/);
+  } finally {
+    db.close();
+  }
+});
+
+test('the brief calls a fresh note already covered, and forgets it once the window passes', () => {
+  // The skill forbids capturing the same juncture twice in one conversation, and that
+  // rule currently rests on the model remembering across a long turn. This is the same
+  // rule as data. Recency is an approximation of a session and is labelled as one.
+  const db = seed();
+  try {
+    writeNote({ id: 'just-now', type: 'convention', title: 'Written this minute', body: 'x', repos: ['repo-a'] });
+    idx.reindex(db);
+
+    const fresh = buildBrief(db, { repo: 'repo-a', gap: null, now: Date.now() });
+    assert.ok(fresh.recent.includes('just-now'));
+    assert.match(renderBrief(fresh), /already covered: .*just-now/);
+
+    // Two hours on, at the default window, the same note is history rather than a
+    // duplicate risk -- re-capturing a juncture from last week is a legitimate update.
+    const later = buildBrief(db, {
+      repo: 'repo-a', gap: null, now: Date.now() + (DEFAULTS.briefRecentMinutes + 1) * 60000,
+    });
+    assert.deepEqual(later.recent, []);
+  } finally {
+    db.close();
+  }
+});
+
+test('the brief never truncates silently and stays on the tree budget', () => {
+  // The failure this prevents is precise: a clipped list reads as the whole store, so
+  // a duplicate gets written against a note that was there the entire time.
+  const db = seed();
+  try {
+    for (let i = 0; i < 30; i++) {
+      writeNote({ id: `filler-${i}`, type: 'system', title: `Filler ${i}`, body: 'b', repos: ['repo-a'] });
+    }
+    idx.reindex(db);
+    const cfg = { ...DEFAULTS, treeLines: 12 };
+    const text = renderBrief(buildBrief(db, { repo: 'repo-a', cfg, gap: null }));
+    assert.match(text, /more not shown, run agent-memory tree --all/);
+    // The constraint survives any cap, here as everywhere else.
+    assert.match(text, /no-external-db/);
+  } finally {
+    db.close();
+  }
+});
+
+test('brief runs as a command, scopes to the repo, and reports empty honestly', () => {
+  const home = mkdtempSync(join(tmpdir(), 'agent-memory-brief-'));
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const run = (...args) =>
+    spawnSync(process.execPath, [cli, ...args], {
+      env: { ...process.env, AGENT_MEMORY_HOME: home }, encoding: 'utf8',
+    });
+  try {
+    assert.equal(run('init').status, 0);
+
+    const empty = run('brief');
+    assert.equal(empty.status, 0, empty.stderr);
+    assert.match(empty.stdout, /capture brief/);
+    // All four types absent is the honest reading of an empty store, and the one a
+    // fresh install has to survive without looking broken.
+    for (const t of ['system', 'decision', 'convention', 'constraint']) {
+      assert.match(empty.stdout, new RegExp(`^ {2}${t}`, 'm'), `${t} missing from the empty brief`);
+    }
+
+    const json = run('brief', '--json');
+    assert.equal(json.status, 0, json.stderr);
+    const parsed = JSON.parse(json.stdout);
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.total, 0);
+    assert.deepEqual(parsed.missing, ['system', 'decision', 'convention', 'constraint']);
+    assert.equal(parsed.recentMinutes, DEFAULTS.briefRecentMinutes);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

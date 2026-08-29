@@ -1,11 +1,11 @@
 import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { join, sep } from 'node:path';
+import { join, sep, basename, dirname } from 'node:path';
 import { loadConfig, paths } from './config.js';
 import { listNotes, archiveNote, contentHash, nowIso, serializeNote } from './store.js';
 import { atomicWrite } from './atomic.js';
 import { openDb, reindex } from './index-db.js';
-import { buildDigest, buildTree, renderTree } from './digest.js';
+import { buildDigest, buildCaptureNudge, buildTree, renderTree } from './digest.js';
 
 /**
  * Compaction is pure code. No model is involved, and none should be.
@@ -203,9 +203,33 @@ export function writeSkillDescription(skillPath, description) {
   return true;
 }
 
-/** Regenerate everything derived: ROUTING.md and each installed skill description. */
+/**
+ * Which skill a registered path belongs to.
+ *
+ * Derived from the path rather than stored beside it, because `setup` is what creates
+ * these paths and it only ever creates the two shapes below. Keeping `skillPaths` a
+ * flat list of strings means no config migration and no second source of truth about
+ * which skill is which — the layout already answers it.
+ */
+export function skillNameFromPath(p) {
+  const file = basename(p);
+  if (file === 'SKILL.md') return basename(dirname(p));
+  const m = file.match(/^(.+)\.prompt\.md$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Regenerate everything derived: ROUTING.md and each installed skill description.
+ *
+ * Two descriptions are generated, not one, and which a path receives is decided by the
+ * skill it belongs to. `remember` gets the capture nudge; everything else registered
+ * gets the digest. Before this, one text was written to every registered path, which is
+ * why `setup` could only ever register `recall` — handing `remember` the digest would
+ * have replaced a good description with a description of the wrong thing.
+ */
 function regenerate(db, cfg) {
   const digest = buildDigest(db, { cfg });
+  const nudge = buildCaptureNudge(db, { cfg });
   const tree = buildTree(db, { all: true, cfg });
 
   const routing = [
@@ -227,9 +251,18 @@ function regenerate(db, cfg) {
       skipped.push(p);
       continue;
     }
-    if (writeSkillDescription(p, digest)) skills.push(p);
+    const text = skillNameFromPath(p) === 'remember' ? nudge : digest;
+    if (writeSkillDescription(p, text)) skills.push(p);
   }
-  return { digest, digestChars: digest.length, routing: paths.routing, skills, skipped };
+  return {
+    digest,
+    digestChars: digest.length,
+    nudge,
+    nudgeChars: nudge.length,
+    routing: paths.routing,
+    skills,
+    skipped,
+  };
 }
 
 /**

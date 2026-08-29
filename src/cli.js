@@ -10,7 +10,9 @@ import {
   openDb, reindex, searchNodes, getNodeRow, markAccessed, nodeCount, hasFts,
 } from './index-db.js';
 import { neighborhood, applyBudget } from './graph.js';
-import { buildTree, renderTree, buildDigest } from './digest.js';
+import {
+  buildTree, renderTree, buildDigest, buildCaptureNudge, buildBrief, renderBrief,
+} from './digest.js';
 import { compact, maybeCompact } from './compact.js';
 import { staleness, currentRepo, reviewCandidates, captureGap } from './staleness.js';
 import { setup as runSetup, unlinkSkills, danglingSkillLinks, SKILLS } from './setup.js';
@@ -121,6 +123,7 @@ const USAGE = `agent-memory — durable cross-repo knowledge for coding agents
   search <terms> [--limit N]             full-text fallback when the tree misses
   write --from-json <file>               validated upsert; used by the skills
         [--source <name>] [--repo <name>]
+  brief [--repo <name>]                  what is already known here, before capturing
   compact                                dedup, decay, reindex, regenerate
   doctor                                 preflight and health report
   export [--scope global|repo|all]       knowledge worth carrying to another machine
@@ -217,7 +220,7 @@ function cmdSetup() {
   if (r.compactError) {
     lines.push(
       '',
-      `  Skills are installed, but refreshing the /recall description failed: ${r.compactError}`,
+      `  Skills are installed, but refreshing the /recall and /remember descriptions failed: ${r.compactError}`,
       '  Run `agent-memory index` then `agent-memory compact` to retry just that step.',
     );
   }
@@ -284,6 +287,23 @@ function cmdTree(opts) {
   const gap = repo ? captureGap(db, { cfg, repo }) : null;
   db.close();
   return { ok: true, ...result, gap, text: renderTree({ ...result, gap }) };
+}
+
+/**
+ * Tier 2 of the capture pipeline: what the store already knows, before writing to it.
+ *
+ * The counterpart to \`tree\`. Same scoping, same budget, opposite reader: \`tree\` tells an
+ * agent which note answers a question, this tells it which note it is about to write
+ * twice. One call, in a turn already paid for.
+ */
+function cmdBrief(opts) {
+  const cfg = loadConfig();
+  const db = openDb();
+  // \`--repo\` with no value means every repo, matching tree. Anything else names one.
+  const repo = opts.repo === true ? null : (opts.repo ?? currentRepo());
+  const result = buildBrief(db, { repo, cfg });
+  db.close();
+  return { ok: true, ...result, text: renderBrief(result) };
 }
 
 function cmdGet(opts) {
@@ -481,6 +501,7 @@ function cmdCompact() {
     ...r.decayed.map((d) => `archived ${d.id}, last seen ${d.lastSeen}`),
     ...r.malformed.map((m) => `warning: unparseable ${m.path}`),
     `digest ${r.digestChars} chars`,
+    `capture nudge ${r.nudgeChars} chars`,
     ...r.skills.map((s) => `updated description in ${s}`),
     ...(r.skipped || []).map(
       (s) => `skipped ${s}: inside this package's git checkout, so the file is tracked`
@@ -552,6 +573,11 @@ function cmdDoctor() {
 
   const digest = buildDigest(db, { cfg });
   add('digest within cap', digest.length <= cfg.digestChars, `${digest.length}/${cfg.digestChars} chars`);
+
+  // The nudge shares the cap and the silent fallback: over it, Tier 1 quietly becomes
+  // the generic string, which reads exactly like a store with nothing to report.
+  const nudge = buildCaptureNudge(db, { cfg });
+  add('capture nudge within cap', nudge.length <= cfg.digestChars, `${nudge.length}/${cfg.digestChars} chars`);
 
   const registered = cfg.skillPaths || [];
   const missing = registered.filter((p) => !existsSync(p));
@@ -640,7 +666,7 @@ function cmdDoctor() {
   // Staleness is a report, not a failure. Being told about it is the whole feature.
   const advisory = new Set(['staleness', 'capture gap', 'skills linked']);
   const fatal = checks.filter((c) => !c.ok && !advisory.has(c.name));
-  return { ok: fatal.length === 0, checks, stale, gap, digest, text };
+  return { ok: fatal.length === 0, checks, stale, gap, digest, nudge, text };
 }
 
 // --- dispatch ---------------------------------------------------------------
@@ -974,6 +1000,7 @@ const COMMANDS = {
   init: cmdInit,
   index: cmdIndex,
   tree: cmdTree,
+  brief: cmdBrief,
   get: cmdGet,
   search: cmdSearch,
   write: cmdWrite,
