@@ -103,6 +103,7 @@ export const DEFAULTS = {
   captureGapCommits: 50, // repo movement with no capture at all before it is worth saying
   compactThreshold: 10, // node-count delta that triggers an automatic compact
   briefRecentMinutes: 120, // window the capture brief calls already covered
+  briefRecentIds: 10, // ids printed from that window before the rest are counted
 };
 
 // Written by the installer: every SKILL.md whose description compact regenerates.

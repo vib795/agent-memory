@@ -253,13 +253,14 @@ flowchart TB
         D["recall description<br/>≤ 400 chars — what the store knows<br/>'Durable project knowledge: 5 notes, 1 constraint<br/>across agent-memory. Topics: … Use when …'"]
         R["remember description<br/>≤ 400 chars — what it is missing<br/>'340 commits since anything was captured<br/>for agent-memory. Use when …'"]
     end
-    subgraph t2["TIER 2 — per-invocation, only when recall fires"]
-        TR["routing tree<br/>≤ 80 lines<br/>type · id · title, ordered by<br/>constraint-first then degree"]
+    subgraph t2["TIER 2 — per-invocation, when recall or remember fires"]
+        TR["recall: routing tree<br/>≤ 80 lines, constraint-first then degree"]
+        BR["remember: capture brief<br/>same list, plus empty types<br/>and what was just captured"]
     end
     subgraph t3["TIER 3 — only what was asked for"]
         N["note bodies + neighborhood<br/>≤ 8 KB"]
     end
-    t1 -->|"agent decides to invoke"| t2 -->|"agent picks an id"| t3
+    t1 -->|"agent decides to invoke"| t2 -->|"agent picks an id, or writes one"| t3
 
     style t1 fill:#12514c,color:#fff
     style t2 fill:#2d6a63,color:#fff
