@@ -19,7 +19,7 @@ const { searchNodes } = idx;
 const { neighborhood, applyBudget } = await import('../src/graph.js');
 const { buildTree, buildDigest, buildCaptureNudge, renderTree, buildBrief, renderBrief } =
   await import('../src/digest.js');
-const { compact, writeSkillDescription, insideCheckout, skillNameFromPath } =
+const { compact, writeSkillDescription, insideCheckout, skillNameFromPath, resetTrackedCache } =
   await import('../src/compact.js');
 const stale = await import('../src/staleness.js');
 const { setup, unlinkSkills, danglingSkillLinks, skillTargets, packagedSkillsDir, SKILLS } =
@@ -1579,5 +1579,55 @@ test('brief runs as a command, scopes to the repo, and reports empty honestly', 
     assert.equal(parsed.recentMinutes, DEFAULTS.briefRecentMinutes);
   } finally {
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('compact refuses a tracked file in any repo, not just the running package', () => {
+  // The bug this replaced: the guard asked whether the *running package* had a .git,
+  // which is true from a checkout and false from an installed package. So a registered
+  // path pointing into a checkout was refused in dev mode and silently written in
+  // normal mode. Switching a machine from `npm install -g .` to the published package
+  // leaves exactly such a path behind, and the next compact wrote a machine-specific
+  // digest into a tracked file -- observed on a real install, not hypothesised.
+  seed().close();
+  const repo = mkdtempSync(join(tmpdir(), 'agent-memory-tracked-'));
+  const git = (...args) =>
+    execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'Test');
+
+  const body = '---\nname: recall\ndescription: placeholder\n---\n\n# body\n';
+  const tracked = join(repo, 'skills', 'recall', 'SKILL.md');
+  mkdirSync(join(repo, 'skills', 'recall'), { recursive: true });
+  writeFileSync(tracked, body, 'utf8');
+  // Untracked, in the same repository. Writing it publishes nothing, so it is fair
+  // game -- the guard is about tracked-ness, not about being near a .git.
+  const untracked = join(repo, 'skills', 'scratch.prompt.md');
+  writeFileSync(untracked, '---\nname: recall\ndescription: placeholder\n---\n\n# body\n', 'utf8');
+  git('add', 'skills/recall/SKILL.md');
+  git('commit', '-qm', 'add skill');
+
+  try {
+    resetTrackedCache();
+    assert.equal(insideCheckout(tracked), true, 'a tracked file is refused');
+    assert.equal(insideCheckout(untracked), false, 'an untracked file is writable');
+
+    // Reached through the symlink setup actually plants. Asking about the link would
+    // answer "not tracked" and then write straight through it into the repository.
+    const dir = mkdtempSync(join(tmpdir(), 'agent-memory-tlink-'));
+    const link = join(dir, 'SKILL.md');
+    symlinkSync(tracked, link);
+    resetTrackedCache();
+    assert.equal(insideCheckout(link), true, 'a symlink must be resolved before asking git');
+
+    const r = compact({ cfg: { ...DEFAULTS, skillPaths: [tracked, untracked, link] } });
+    assert.equal(readFileSync(tracked, 'utf8'), body, 'the tracked file must be byte-identical');
+    assert.ok(r.skipped.includes(tracked), 'and the refusal is reported, never silent');
+    assert.ok(r.skills.includes(untracked), 'the untracked file still gets its description');
+    rmSync(dir, { recursive: true, force: true });
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    resetTrackedCache();
   }
 });

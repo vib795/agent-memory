@@ -1,4 +1,5 @@
 import { readFileSync, existsSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, sep, basename, dirname } from 'node:path';
 import { loadConfig, paths } from './config.js';
@@ -152,34 +153,89 @@ function decay(active, cfg, now) {
  * what it now knows without costing anything at chat time.
  */
 // The directory this package was installed into. `setup` links skill directories at
-// `<package>/skills/<name>`, so every description write lands in the package's own
+// `<package>/skills/<name>`, so a description write normally lands in the package's own
 // files. That is correct for an installed package and wrong for a git checkout, where
 // those files are tracked: one developer's digest gets committed and then published to
 // everyone. It shipped that way for twenty releases, advertising one machine's five
 // notes to every user who installed the plugin.
 const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
+// One process, one answer, so a per-run cache cannot go stale. `compact` asks about
+// every registered path on every call, and most of them resolve to the same few trees.
+const trackedCache = new Map();
+
 /**
- * Is this path inside the package's own git checkout?
+ * Does git consider this exact file tracked?
  *
- * Resolved through `realpathSync` because the path arrives as a symlink planted by
- * `setup`; the link sits outside the checkout even when its target is inside it, which
- * is the whole reason this went unnoticed. The `.git` test separates a developer's
- * working tree from an ordinary install, which has no `.git` and must keep being
- * written to — that write is the Tier-1 mechanism, not a bug.
+ * `true` and `false` are answers; `null` means git could not be asked and the caller
+ * has to fall back. A non-zero exit covers both "not tracked" and "not in a repository",
+ * and those mean the same thing here: writing the file publishes nothing.
+ */
+function isTracked(real) {
+  if (trackedCache.has(real)) return trackedCache.get(real);
+  let answer;
+  try {
+    execFileSync('git', ['ls-files', '--error-unmatch', '--', basename(real)], {
+      cwd: dirname(real),
+      stdio: ['ignore', 'ignore', 'ignore'],
+      timeout: 5000,
+    });
+    answer = true;
+  } catch (err) {
+    // ENOENT is git missing, which is not an answer about the file. Anything else is
+    // git having run and said no.
+    answer = err.code === 'ENOENT' ? null : false;
+  }
+  trackedCache.set(real, answer);
+  return answer;
+}
+
+/**
+ * Would writing this file commit local state into someone's repository?
+ *
+ * The question is about the **target**, not about where this code is running from, and
+ * that distinction is the bug this replaced. The old test asked whether the running
+ * package had a `.git`, which is true from a checkout and false from an installed
+ * package — so a registered path pointing into a checkout was refused in dev mode and
+ * silently written in normal mode. Switching a machine from `npm install -g .` to the
+ * published package leaves exactly such a path behind, and the next `compact` wrote a
+ * machine-specific digest into a tracked file. The same failure that shipped one
+ * machine's note count for twenty releases, reached from the other direction.
+ *
+ * Tracked-ness is the property that actually matters, so ask git directly. Resolved
+ * through `realpathSync` first because the path arrives as a symlink planted by
+ * `setup`: the link sits outside the repository even when its target is inside it, and
+ * asking about the link would answer "not tracked" and then write straight through it.
+ *
+ * Without git, fall back to the old package-root heuristic. It is narrower than the
+ * real question but it is what this shipped with, and a machine with no git also has
+ * no tracked file to damage.
  */
 export function insideCheckout(file) {
-  if (!existsSync(join(PACKAGE_ROOT, '.git'))) return false;
   let real;
-  let root;
   try {
     real = realpathSync(file);
+  } catch {
+    return false;
+  }
+
+  const tracked = isTracked(real);
+  if (tracked !== null) return tracked;
+
+  if (!existsSync(join(PACKAGE_ROOT, '.git'))) return false;
+  let root;
+  try {
     root = realpathSync(PACKAGE_ROOT);
   } catch {
     return false;
   }
   if (root.endsWith(sep)) root = root.slice(0, -1);
   return real === root || real.startsWith(root + sep);
+}
+
+/** Testing seam: the per-process cache would otherwise outlive a fixture repo. */
+export function resetTrackedCache() {
+  trackedCache.clear();
 }
 
 export function writeSkillDescription(skillPath, description) {
