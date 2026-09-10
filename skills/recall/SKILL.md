@@ -119,8 +119,10 @@ Rules that separate a useful recall from a confident wrong one:
    right now, trust the repository, say which note is wrong, and suggest
    `/remember` to correct it. A store that quietly rots is worse than no store.
 4. **Never present an `inferred` note as established.** The note says which it is.
-5. **Answer the question** — the one the conversation was asking, or the one
-   `/recall <topic>` named. Do not summarize the store.
+5. **Answer the question.** An explicit `/recall <topic>` is the target whenever one
+   was given, and it wins over a different question already in the conversation —
+   the user narrowed it on purpose. Fall back to the conversation's own question only
+   for a bare `/recall`. Either way, do not summarize the store.
 
 ---
 
