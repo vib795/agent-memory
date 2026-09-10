@@ -440,7 +440,7 @@ equivalent and is not: npm links the global install to that folder rather than c
 it, which shows up as an arrow in `npm list -g`:
 
 ```
-`-- @vib795/agent-memory@0.7.4 -> .\..\..\..\agent-memory
+`-- @vib795/agent-memory@0.7.5 -> .\..\..\..\agent-memory
 ```
 
 Move or delete the clone afterwards and the global install points at nothing — the same

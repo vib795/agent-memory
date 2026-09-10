@@ -59,6 +59,10 @@ are the router. There is no keyword matching underneath this and there should no
 be: a title is a sentence, and matching sentences to a question is what you do well
 and what a regex does badly.
 
+When the user typed `/recall <topic>`, `<topic>` is the question. Route on it, and carry
+it into Step 5 — a cold `/recall deploy ordering` is someone asking what the store knows
+about deploy ordering, not asking for a tour of the store.
+
 - Pick 1 to 3 ids. More than 3 means the question is really several questions.
 - Always include a `constraint` that touches the subject, even when the user did not
   ask about limits. Constraints are what stop an approach that cannot ship.
@@ -115,7 +119,8 @@ Rules that separate a useful recall from a confident wrong one:
    right now, trust the repository, say which note is wrong, and suggest
    `/remember` to correct it. A store that quietly rots is worse than no store.
 4. **Never present an `inferred` note as established.** The note says which it is.
-5. Answer the question. Do not summarize the store.
+5. **Answer the question** — the one the conversation was asking, or the one
+   `/recall <topic>` named. Do not summarize the store.
 
 ---
 

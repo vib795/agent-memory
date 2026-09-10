@@ -107,6 +107,13 @@ Skip this step only when the user named exactly what to write and it is plainly 
 
 ## Step 1 — Select what is durable
 
+When the user typed `/remember <what>`, `<what>` is both a filter and a mandate: select
+only what bears on it, and select that even if you would otherwise have ranked something
+else higher. It does not suspend the durability test below. If the named thing is task
+state, write nothing and say so in one line — `that reads as task state, not durable;
+nothing written`. Writing nothing *silently* after an explicit request is the failure
+that matters here, because the user leaves believing it was captured.
+
 <!-- extraction-rules:start -->
 - A node is durable only if it will still be true next month. Task state is not
   durable and belongs in a handoff file, not in the graph.
