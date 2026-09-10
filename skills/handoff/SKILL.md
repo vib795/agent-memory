@@ -26,6 +26,22 @@ Every extra request costs the user credits, which is the reason this skill exist
 
 ---
 
+## Scope
+
+Bare `/handoff`: you decide what the working state is.
+
+`/handoff <focus>` — "just the auth work", "the migration, skip the CI detour" — names
+which thread of a braided conversation to carry forward. Treat it as a filter on Step 2
+and Step 3, not as a title. Work outside that focus stays out of Orientation, Decisions
+and Current task state even when it was the more recent work: a long conversation
+usually holds more than one thread, and carrying both is how a handoff becomes the
+transcript summary this skill exists to avoid.
+
+If the focus names a thread you cannot find in the conversation, say so in one line and
+hand off what you did find. Do not invent a thread to match the words.
+
+---
+
 ## Step 0 — Resolve the store path
 
 | Platform | Store |
