@@ -87,6 +87,35 @@ package, no service, and no network. `npm ls -g --depth 0` shows nothing under i
 On a locked-down desktop that is the difference between "a Node script" and "a new
 database", which is the entire argument you will have to make to get this approved.
 
+**Why that is not just a smaller dependency count.** The usual way to reach SQLite
+from Node is `better-sqlite3`, and it is a *native addon*: npm fetches it, then either
+downloads a per-platform prebuilt `.node` binary or compiles C++ on the machine at
+install time. That adds a package to the allowlist, a compiler or a prebuilt artefact
+to every desktop, and a transitive tree behind both. `node:sqlite` is the same engine,
+already inside the Node binary your organisation approved. Nothing is fetched and
+nothing compiles.
+
+So "zero dependencies" here does not mean *vendored*, and it does not mean *only small
+ones*. Every import in `src/` is a Node built-in:
+
+```
+node:child_process   node:crypto   node:fs   node:os
+node:path            node:sqlite   node:url
+```
+
+`package.json` has no `dependencies` key at all, and no `devDependencies` either. A
+reviewer has nothing to audit but this repository. It is enforced rather than promised
+— `.github/workflows/test.yml` fails the build if a dependency is ever added:
+
+```bash
+n=$(node -p "Object.keys(require('./package.json').dependencies||{}).length")
+test "$n" -eq 0 || { echo "::error::$n runtime dependencies; this package must have none"; exit 1; }
+```
+
+The price of this is the Node floor: 22.5 or newer, which is the release where
+`node:sqlite` landed. That is the one real cost, and it is why `doctor` checks the
+Node version before anything else.
+
 - **Markdown is the source of truth.** `index.db` is a disposable cache; delete it
   and `agent-memory index` rebuilds it byte-identically.
 - **Nothing leaves the machine.** No daemon, no scheduled task, no telemetry.
@@ -440,7 +469,7 @@ equivalent and is not: npm links the global install to that folder rather than c
 it, which shows up as an arrow in `npm list -g`:
 
 ```
-`-- @vib795/agent-memory@0.7.5 -> .\..\..\..\agent-memory
+`-- @vib795/agent-memory@0.7.6 -> .\..\..\..\agent-memory
 ```
 
 Move or delete the clone afterwards and the global install points at nothing — the same
