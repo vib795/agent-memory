@@ -1,6 +1,6 @@
 {
   "name": "@vib795/agent-memory",
-  "version": "0.7.5",
+  "version": "0.8.0",
   "description": "Durable cross-repo knowledge graph for GitHub Copilot and Claude Code. Markdown source of truth, disposable SQLite index, zero runtime dependencies.",
   "keywords": [
     "github-copilot",
@@ -20,10 +20,10 @@
   "author": "Utkarsh Singh (https://github.com/vib795)",
   "type": "module",
   "bin": {
-    "agent-memory": "src/cli.js"
+    "agent-memory": "src/bin.js"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.16.0"
   },
   "scripts": {
     "test": "node --test",

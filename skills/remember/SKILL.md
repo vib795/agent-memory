@@ -250,7 +250,7 @@ Warnings from `write` are worth surfacing verbatim:
   once. If it fails again, print the errors and stop; do not guess at the schema.
 - **`agent-memory: command not found`.** Print the JSON in the chat first, so the
   work is not lost, then say the store needs `npm install -g @vib795/agent-memory`
-  (Node >= 22.5). Do not run it yourself. This is the expected state when the skill
+  (Node >= 22.16). Do not run it yourself. This is the expected state when the skill
   was installed on its own with `gh skill install` rather than with the package.
 - **Nothing durable in the conversation.** Say so in one line. That is a correct
   outcome, not a failure.

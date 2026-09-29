@@ -3,8 +3,8 @@
 How agent-memory is built, and why it is built that way.
 
 Every figure here was read from the source rather than written from memory, at
-v0.7.5: 15 modules, 4,168 lines of JavaScript, zero runtime dependencies and zero
-dev dependencies, 111 tests.
+v0.8.0: 16 modules, 4,201 lines of JavaScript, zero runtime dependencies and zero
+dev dependencies, 113 tests.
 
 ---
 
@@ -28,6 +28,38 @@ locked-down corporate desktop:
 - A security reviewer can read the entire store without running anything.
 - There is no schema migration story, because a cache does not need one. A version
   mismatch drops the tables and rebuilds from the markdown.
+
+### Why the index is `node:sqlite` and not `better-sqlite3`
+
+The engine is the one already compiled into the Node binary. `src/index-db.js` opens it
+with `import { DatabaseSync } from 'node:sqlite'`, and that `node:` prefix is the whole
+argument: it is a built-in, not a package.
+
+`better-sqlite3` is the conventional choice and a good library, but it is a **native
+addon**. Installing it means npm fetches a package, then either pulls a per-platform
+prebuilt `.node` binary or runs a C++ compile on the target machine. On a managed
+desktop that is three separate approval problems — a new package on the allowlist, a
+build toolchain or a trusted prebuilt artefact on every machine, and a transitive tree
+behind both — to get a database the runtime already contains.
+
+That is also why the claim is "zero dependencies" rather than "few" or "vendored".
+Every import in `src/` is a built-in:
+
+```
+node:child_process   node:crypto   node:fs   node:os
+node:path            node:sqlite   node:url
+```
+
+`package.json` carries no `dependencies` key and no `devDependencies` key, so `npm
+install` fetches exactly one package and a reviewer reads only this repository. CI
+fails the build if that ever stops being true.
+
+The cost is the engine requirement — Node >= 22.16 — and it arrived in three steps.
+`node:sqlite` appeared in 22.5 behind `--experimental-sqlite`, was unflagged in 22.13, and
+the bundled SQLite gained **FTS5** only in 22.16. `search` is built on FTS5, so 22.16 is
+the first version where this package runs rather than merely imports. That is the trade
+this design accepts on purpose, and it is why `doctor` checks the version and
+`fts5: available` separately.
 
 ---
 
@@ -487,7 +519,8 @@ The properties that must stay true. Each is covered by the test suite.
 | `redact.js` | 97 | capture-time fail-closed secret redaction |
 | `promptfile.js` | 78 | VS Code prompt files derived from SKILL.md |
 | `atomic.js` | 57 | atomic write; imports nothing from this package |
-| **total** | **4,168** | zero dependencies, 111 tests |
+| `bin.js` | 33 | the Node floor, checked before the module graph loads |
+| **total** | **4,201** | zero dependencies, 113 tests |
 
 `atomic.js` deliberately imports nothing from the package: `store.js` already imports
 `config.js`, so putting the atomic write in either would create a cycle.

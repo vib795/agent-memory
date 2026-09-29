@@ -17,7 +17,7 @@ set -uo pipefail
 source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if ! command -v node >/dev/null 2>&1; then
-  echo "node not found on PATH. agent-memory needs Node >= 22.5." >&2
+  echo "node not found on PATH. agent-memory needs Node >= 22.16." >&2
   exit 1
 fi
 

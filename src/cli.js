@@ -30,7 +30,7 @@ import { redactNodeForExport, buildReceipt, renderReceipt } from './pii.js';
  * run and the first thing that breaks after a reboot.
  */
 
-const MIN_NODE = [22, 5];
+const MIN_NODE = [22, 16];
 
 /**
  * Where this process is actually running from, and what version it is.
@@ -589,7 +589,7 @@ function cmdDoctor() {
       checks,
       text:
         `FAIL node version: ${process.versions.node}, need >= ${MIN_NODE.join('.')}.\n` +
-        'node:sqlite ships in Node core from 22.5 onward; there is no dependency to install.',
+        'node:sqlite carries FTS5 in Node core from 22.16 onward; there is no dependency to install.',
     };
   }
 

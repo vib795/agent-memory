@@ -20,6 +20,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # These are LABELS, not the versions installed. Each one becomes part of the job
+        # name, and branch protection requires those names by exact string — renaming '22'
+        # to '22.16.0' made three required checks unreportable and blocked the merge. The
+        # version actually installed is resolved in the setup step below.
         node: ['22', '24']
 
     steps:
@@ -27,10 +31,17 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          # The '22' leg installs the exact floor package.json declares, so the lower
+          # bound is genuinely exercised. A bare '22' resolves to the newest 22.x, which
+          # always sits above the floor — that is how ">=22.5" survived fifteen releases
+          # while node:sqlite needed 22.13 to import and 22.16 to carry FTS5. Bump this
+          # alongside MIN_NODE; the suite asserts MIN_NODE agrees with engines.
+          node-version: ${{ matrix.node == '22' && '22.16.0' || matrix.node }}
 
-      # node:sqlite ships in Node core from 22.5. Assert it rather than discover it
-      # through a confusing failure three steps later.
+      # node:sqlite appears in 22.5 behind a flag, is unflagged in 22.13, and only gains
+      # FTS5 in 22.16 — which search needs. The lower entry is pinned to the exact floor
+      # package.json declares. A floating '22' resolves above it and never tests it; that
+      # is how ">=22.5" survived unnoticed, and how 22.13 nearly shipped as the "fix".
       - name: Verify node:sqlite is present
         run: node -e "const s=require('node:sqlite'); if(!s.DatabaseSync) throw new Error('no DatabaseSync'); console.log('node',process.versions.node,'sqlite ok')"
 

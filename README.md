@@ -21,7 +21,7 @@ npm install -g @vib795/agent-memory
 agent-memory setup
 ```
 
-Node >= 22.5, and nothing else.
+Node >= 22.16, and nothing else.
 
 In Claude Code you can take the three skills as a plugin instead of letting `setup`
 link them:
@@ -61,7 +61,7 @@ the write and read paths, the tiered context cost, and the invariants underneath
 [![test](https://github.com/vib795/agent-memory/actions/workflows/test.yml/badge.svg)](https://github.com/vib795/agent-memory/actions/workflows/test.yml)
 [![release](https://github.com/vib795/agent-memory/actions/workflows/release.yml/badge.svg)](https://github.com/vib795/agent-memory/actions/workflows/release.yml)
 [![provenance](https://img.shields.io/badge/provenance-attested-brightgreen)](https://www.npmjs.com/package/@vib795/agent-memory)
-[![node](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)](https://nodejs.org)
+[![node](https://img.shields.io/badge/node-%3E%3D22.16-brightgreen)](https://nodejs.org)
 [![dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](package.json)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -82,10 +82,42 @@ Nothing in the platform closes the gap:
 
 ## Zero runtime dependencies
 
-`node:sqlite` has shipped inside Node core since 22.5, so the graph index needs no
+`node:sqlite` is built into Node core — no package, no addon — so the graph index needs no
 package, no service, and no network. `npm ls -g --depth 0` shows nothing under it.
 On a locked-down desktop that is the difference between "a Node script" and "a new
 database", which is the entire argument you will have to make to get this approved.
+
+**Why that is not just a smaller dependency count.** The usual way to reach SQLite
+from Node is `better-sqlite3`, and it is a *native addon*: npm fetches it, then either
+downloads a per-platform prebuilt `.node` binary or compiles C++ on the machine at
+install time. That adds a package to the allowlist, a compiler or a prebuilt artefact
+to every desktop, and a transitive tree behind both. `node:sqlite` is the same engine,
+already inside the Node binary your organisation approved. Nothing is fetched and
+nothing compiles.
+
+So "zero dependencies" here does not mean *vendored*, and it does not mean *only small
+ones*. Every import in `src/` is a Node built-in:
+
+```
+node:child_process   node:crypto   node:fs   node:os
+node:path            node:sqlite   node:url
+```
+
+`package.json` has no `dependencies` key at all, and no `devDependencies` either. A
+reviewer has nothing to audit but this repository. It is enforced rather than promised
+— `.github/workflows/test.yml` fails the build if a dependency is ever added:
+
+```bash
+n=$(node -p "Object.keys(require('./package.json').dependencies||{}).length")
+test "$n" -eq 0 || { echo "::error::$n runtime dependencies; this package must have none"; exit 1; }
+```
+
+The price of this is the Node floor: **22.16 or newer**, and it took three steps to get
+there. `node:sqlite` first appeared in 22.5 behind `--experimental-sqlite`; it was
+unflagged in 22.13; and the bundled SQLite only gained the **FTS5** extension in 22.16.
+`search` is built on FTS5, so 22.16 is the first version where this package runs rather
+than merely imports. That is the one real cost, and it is why `doctor` reports the Node
+version and `fts5: available` as two separate lines.
 
 - **Markdown is the source of truth.** `index.db` is a disposable cache; delete it
   and `agent-memory index` rebuilds it byte-identically.
@@ -440,7 +472,7 @@ equivalent and is not: npm links the global install to that folder rather than c
 it, which shows up as an arrow in `npm list -g`:
 
 ```
-`-- @vib795/agent-memory@0.7.5 -> .\..\..\..\agent-memory
+`-- @vib795/agent-memory@0.8.0 -> .\..\..\..\agent-memory
 ```
 
 Move or delete the clone afterwards and the global install points at nothing — the same
@@ -559,9 +591,9 @@ there — `skills/recall/SKILL.md` and `skills/remember/SKILL.md` are tracked fi
 their committed descriptions are deliberately generic placeholders. `compact` prints
 them as skipped, which is the intended outcome, not a failure.
 
-Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old.
+Needs Node 22.16 or newer; `doctor` says so plainly if the version is too old.
 
-Run `npm test` for the suite (111 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (113 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 
