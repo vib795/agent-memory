@@ -3,8 +3,8 @@
 How agent-memory is built, and why it is built that way.
 
 Every figure here was read from the source rather than written from memory, at
-v0.8.0: 15 modules, 4,168 lines of JavaScript, zero runtime dependencies and zero
-dev dependencies, 111 tests.
+v0.8.0: 16 modules, 4,201 lines of JavaScript, zero runtime dependencies and zero
+dev dependencies, 113 tests.
 
 ---
 
@@ -519,7 +519,8 @@ The properties that must stay true. Each is covered by the test suite.
 | `redact.js` | 97 | capture-time fail-closed secret redaction |
 | `promptfile.js` | 78 | VS Code prompt files derived from SKILL.md |
 | `atomic.js` | 57 | atomic write; imports nothing from this package |
-| **total** | **4,168** | zero dependencies, 111 tests |
+| `bin.js` | 33 | the Node floor, checked before the module graph loads |
+| **total** | **4,201** | zero dependencies, 113 tests |
 
 `atomic.js` deliberately imports nothing from the package: `store.js` already imports
 `config.js`, so putting the atomic write in either would create a cycle.

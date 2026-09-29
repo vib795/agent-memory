@@ -1347,6 +1347,33 @@ test('the extraction rules are identical in both skills', () => {
   assert.equal(block('../skills/remember/SKILL.md'), block('../skills/handoff/SKILL.md'));
 });
 
+test('the Node floor is stated identically in bin.js and cli.js', () => {
+  // bin.js cannot import the constant: it exists precisely because importing anything
+  // that reaches index-db.js would load node:sqlite and crash on the versions this
+  // guard is meant to catch. So the number is written twice, and this is what stops
+  // the copies drifting. `engines` is asserted against it too, because a floor nobody
+  // checks is a floor that was already wrong once: it read ">=22.5.0" for fifteen
+  // releases while node:sqlite needed 22.13 to import and 22.16 to carry FTS5.
+  const read = (f) => readFileSync(new URL(f, import.meta.url), 'utf8');
+  const floor = (src) => {
+    const m = src.match(/const MIN_NODE = \[(\d+), (\d+)\]/);
+    assert.ok(m, 'no MIN_NODE found');
+    return `${m[1]}.${m[2]}`;
+  };
+  const binFloor = floor(read('../src/bin.js'));
+  assert.equal(binFloor, floor(read('../src/cli.js')));
+
+  const engines = JSON.parse(read('../package.json')).engines.node;
+  assert.equal(engines, `>=${binFloor}.0`);
+});
+
+test('the packaged bin is the guard, not the cli', () => {
+  // Pointing bin at cli.js is what produced ERR_UNKNOWN_BUILTIN_MODULE instead of a
+  // sentence. If this ever flips back, every user below the floor gets a stack trace.
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(pkg.bin['agent-memory'], 'src/bin.js');
+});
+
 test('every manifest that carries a version agrees with package.json', () => {
   // These drifted silently for fifteen releases: plugin.json sat at 0.3.1 and
   // marketplace.json at 0.1.5 while the package shipped 0.5.0, because nothing read

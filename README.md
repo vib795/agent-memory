@@ -593,7 +593,7 @@ them as skipped, which is the intended outcome, not a failure.
 
 Needs Node 22.16 or newer; `doctor` says so plainly if the version is too old.
 
-Run `npm test` for the suite (111 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (113 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 
