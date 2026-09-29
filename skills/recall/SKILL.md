@@ -131,7 +131,7 @@ Rules that separate a useful recall from a confident wrong one:
 - **`agent-memory: command not found`.** The package is not installed or not on
   PATH. This is the expected state when the skill was installed on its own, with
   `gh skill install`, rather than with the package. Answer from the code, then say
-  once that the store needs `npm install -g @vib795/agent-memory` (Node >= 22.13).
+  once that the store needs `npm install -g @vib795/agent-memory` (Node >= 22.16).
   Do not run it yourself: installing a global package is the user's decision, and on
   a managed desktop it is one they may not be free to make.
 - **Empty store.** Answer from the code, then mention `/remember` once.

@@ -54,10 +54,12 @@ node:path            node:sqlite   node:url
 install` fetches exactly one package and a reviewer reads only this repository. CI
 fails the build if that ever stops being true.
 
-The cost is the engine requirement — Node >= 22.13. `node:sqlite` first appeared in 22.13
-but stayed behind `--experimental-sqlite` until 22.13, so that is the real floor — which
-is the trade this design accepts on purpose, and the first thing `doctor`
-checks.
+The cost is the engine requirement — Node >= 22.16 — and it arrived in three steps.
+`node:sqlite` appeared in 22.5 behind `--experimental-sqlite`, was unflagged in 22.13, and
+the bundled SQLite gained **FTS5** only in 22.16. `search` is built on FTS5, so 22.16 is
+the first version where this package runs rather than merely imports. That is the trade
+this design accepts on purpose, and it is why `doctor` checks the version and
+`fts5: available` separately.
 
 ---
 

@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node: ['22.13.0', '24']
+        node: ['22.16.0', '24']
 
     steps:
       - uses: actions/checkout@v4
@@ -29,9 +29,10 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
-      # node:sqlite exists from 22.5 but is behind --experimental-sqlite until 22.13,
-      # so the lower matrix entry is pinned to the exact floor package.json declares.
-      # A floating '22' would always resolve above the floor and never test it.
+      # node:sqlite appears in 22.5 behind a flag, is unflagged in 22.13, and only gains
+      # FTS5 in 22.16 — which search needs. The lower entry is pinned to the exact floor
+      # package.json declares. A floating '22' resolves above it and never tests it; that
+      # is how ">=22.5" survived unnoticed, and how 22.13 nearly shipped as the "fix".
       - name: Verify node:sqlite is present
         run: node -e "const s=require('node:sqlite'); if(!s.DatabaseSync) throw new Error('no DatabaseSync'); console.log('node',process.versions.node,'sqlite ok')"
 
