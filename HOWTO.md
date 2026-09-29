@@ -49,14 +49,14 @@ somebody else does the filing.
 
 ## 3. Install it (about 60 seconds)
 
-You will need **Node.js version 22.5 or newer**. To check, open a terminal —
+You will need **Node.js version 22.13 or newer**. To check, open a terminal —
 on Windows that's **PowerShell**, on a Mac it's **Terminal** — and type:
 
 ```bash
 node --version
 ```
 
-If that prints something like `v22.5.0` or higher, you are set. If it prints an error or
+If that prints something like `v22.13.0` or higher, you are set. If it prints an error or
 a smaller number, install Node from [nodejs.org](https://nodejs.org) first.
 
 Now run these two lines:
@@ -402,7 +402,7 @@ text, and deleting them is your decision to make, not the uninstaller's.
 ## Cheat sheet
 
 ```bash
-node --version                          # must be 22.5+
+node --version                          # must be 22.13+
 npm install -g @vib795/agent-memory     # 1. download
 agent-memory setup                      # 2. install into your AI tools
 agent-memory doctor                     # is everything OK?

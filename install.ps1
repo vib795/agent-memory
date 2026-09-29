@@ -29,7 +29,7 @@ $source = $PSScriptRoot
 
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) {
-    Write-Error "node not found on PATH. agent-memory needs Node >= 22.5."
+    Write-Error "node not found on PATH. agent-memory needs Node >= 22.13."
     exit 1
 }
 

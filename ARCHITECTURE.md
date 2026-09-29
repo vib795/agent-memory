@@ -54,8 +54,9 @@ node:path            node:sqlite   node:url
 install` fetches exactly one package and a reviewer reads only this repository. CI
 fails the build if that ever stops being true.
 
-The cost is the engine requirement — Node >= 22.5, the release `node:sqlite` shipped in
-— which is the trade this design accepts on purpose, and the first thing `doctor`
+The cost is the engine requirement — Node >= 22.13. `node:sqlite` first appeared in 22.13
+but stayed behind `--experimental-sqlite` until 22.13, so that is the real floor — which
+is the trade this design accepts on purpose, and the first thing `doctor`
 checks.
 
 ---

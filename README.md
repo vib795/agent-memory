@@ -21,7 +21,7 @@ npm install -g @vib795/agent-memory
 agent-memory setup
 ```
 
-Node >= 22.5, and nothing else.
+Node >= 22.13, and nothing else.
 
 In Claude Code you can take the three skills as a plugin instead of letting `setup`
 link them:
@@ -61,7 +61,7 @@ the write and read paths, the tiered context cost, and the invariants underneath
 [![test](https://github.com/vib795/agent-memory/actions/workflows/test.yml/badge.svg)](https://github.com/vib795/agent-memory/actions/workflows/test.yml)
 [![release](https://github.com/vib795/agent-memory/actions/workflows/release.yml/badge.svg)](https://github.com/vib795/agent-memory/actions/workflows/release.yml)
 [![provenance](https://img.shields.io/badge/provenance-attested-brightgreen)](https://www.npmjs.com/package/@vib795/agent-memory)
-[![node](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)](https://nodejs.org)
+[![node](https://img.shields.io/badge/node-%3E%3D22.13-brightgreen)](https://nodejs.org)
 [![dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](package.json)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -82,7 +82,7 @@ Nothing in the platform closes the gap:
 
 ## Zero runtime dependencies
 
-`node:sqlite` has shipped inside Node core since 22.5, so the graph index needs no
+`node:sqlite` is built into Node core — unflagged since 22.13 — so the graph index needs no
 package, no service, and no network. `npm ls -g --depth 0` shows nothing under it.
 On a locked-down desktop that is the difference between "a Node script" and "a new
 database", which is the entire argument you will have to make to get this approved.
@@ -112,8 +112,9 @@ n=$(node -p "Object.keys(require('./package.json').dependencies||{}).length")
 test "$n" -eq 0 || { echo "::error::$n runtime dependencies; this package must have none"; exit 1; }
 ```
 
-The price of this is the Node floor: 22.5 or newer, which is the release where
-`node:sqlite` landed. That is the one real cost, and it is why `doctor` checks the
+The price of this is the Node floor: 22.13 or newer. `node:sqlite` first appeared in
+22.13, but stayed behind `--experimental-sqlite` until 22.13, so 22.13 is the first
+version where this runs unflagged. That is the one real cost, and it is why `doctor` checks the
 Node version before anything else.
 
 - **Markdown is the source of truth.** `index.db` is a disposable cache; delete it
@@ -588,7 +589,7 @@ there — `skills/recall/SKILL.md` and `skills/remember/SKILL.md` are tracked fi
 their committed descriptions are deliberately generic placeholders. `compact` prints
 them as skipped, which is the intended outcome, not a failure.
 
-Needs Node 22.5 or newer; `doctor` says so plainly if the version is too old.
+Needs Node 22.13 or newer; `doctor` says so plainly if the version is too old.
 
 Run `npm test` for the suite (111 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
