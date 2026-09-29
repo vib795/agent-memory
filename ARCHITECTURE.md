@@ -3,7 +3,7 @@
 How agent-memory is built, and why it is built that way.
 
 Every figure here was read from the source rather than written from memory, at
-v0.8.0: 16 modules, 4,201 lines of JavaScript, zero runtime dependencies and zero
+v0.8.1: 16 modules, 4,201 lines of JavaScript, zero runtime dependencies and zero
 dev dependencies, 113 tests.
 
 ---
