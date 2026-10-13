@@ -165,29 +165,32 @@ surfaces:
   - kind: <confluence | sharepoint | local-file | dashboard | ticket>
     ref: <page id, path or URL — never a credential>
 origin:
-  agent: copilot | claude-code
+  agent: <the agent writing this — claude-code, copilot, codex, cursor, ...>
   session: <SESSION from Step 1, or `unknown`>
   host: <HOST>
   cwd: <CWD>
 ---
 
 > **Work out which of these you are before you touch anything.** Read your own identity
-> first: `pwd` works on both shells, and for the session id use
-> `echo "${CLAUDE_CODE_SESSION_ID:-${COPILOT_SESSION_ID:-unknown}}"` on bash or
-> `$env:CLAUDE_CODE_SESSION_ID` on PowerShell. Then take the **first** row below that matches. The rows are ordered and they overlap
+> first: `pwd` works on both shells, and for the session id use the same fallback Step 1
+> used, or you will read your own id as empty and never match the chat that wrote this —
+> `echo "${CLAUDE_CODE_SESSION_ID:-${COPILOT_SESSION_ID:-unknown}}"` on bash, or on
+> PowerShell `$sid = $env:CLAUDE_CODE_SESSION_ID; if (-not $sid) { $sid = $env:COPILOT_SESSION_ID }; if (-not $sid) { $sid = 'unknown' }; $sid`.
+> Then take the **first** row below that matches. The rows are ordered and they overlap
 > on purpose: the row that stops you is checked before the rows that let you work.
 
 | What you observe | You are | What this file is to you |
 |---|---|---|
 | you were told to replicate, but your repo IS under `repos:` | **Conflict — stop** | Checked first, because it also matches Continuing below and the wrong one is silent. Say so in one line and ask which repository was meant. Do not pick a reading: continuing redoes finished work, replicating duplicates it into the tree it already lives in. One question is cheaper than either. |
 | your session id equals `origin.session` | **Resuming** | The same chat, after a restart or a compaction. Next action is yours; do not re-derive what is already recorded here. |
-| session differs, and your repo IS under `repos:` | **Continuing** | A different chat — a new session in the same window counts — on the same tree. Next action applies, but read `git status` and `git log` first: `updated:` records when this was true, not that it still is. |
+| session differs, your repo IS under `repos:`, and you are on the `branch:` recorded for it | **Continuing** | A different chat — a new session in the same window counts — on the same tree and the same line of work. Next action applies, but read `git status` and `git log` first: `updated:` records when this was true, not that it still is. |
+| same, but you are on a **different branch** in that repo | **Continuing, off-branch** | The repository is right and the line of work is not. Say which branch you are on and which one the file records, and confirm before acting on Next action — it names a branch you are not standing on, so a step that looks safe may apply to the wrong tree state. |
 | your repo is NOT under `repos:` | **Replicating** | Next action is wrong by construction — it names branches, paths and versions belonging to another tree. Follow Execution protocol, re-derive every specific from the repository you are actually in, and read Next action as a record of what happened elsewhere. Do not open the repository this was written in. |
 
 `origin.session` of `unknown` collapses Resuming into Continuing: you cannot tell the two
 apart, so take the safer one and re-check git state. Nothing else in the table changes.
 
-`status: done` overrides all four rows. There is no next action, only an outcome.
+`status: done` overrides every row above. There is no next action, only an outcome.
 Report what the file records and ask what is wanted before changing anything.
 
 A `surfaces:` entry with no counterpart in your repository is not replicable. Name it
