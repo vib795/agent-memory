@@ -35,7 +35,7 @@ Three commands you type into the chat box. That is the whole interface.
 |---|---|
 | `/remember` | "Keep this." It writes down what was decided and why. |
 | `/recall` | "What do we already know?" It answers from your notes instead of guessing. |
-| `/handoff` | "Save my place." It bottles up the current work so another window can continue it. |
+| `/handoff` | "Save my place." It bottles up the current work so a new chat or another window can continue it. |
 
 The most important one is `/recall`, and here is the trick: **you usually will not type
 it.** Your assistant reads a one-line summary of everything in your memory at the start
@@ -185,7 +185,7 @@ does while answering — and you can see everything it captured with `/recall` o
 `agent-memory tree`. If it ever writes down something you did not want, the notes are
 plain markdown files you can edit or delete.
 
-### `/handoff` — for moving work between windows
+### `/handoff` — for moving work between chats, windows and repos
 
 This one is not a chat summary. Summaries read nicely and still leave the next
 conversation asking questions.
@@ -194,14 +194,27 @@ conversation asking questions.
 approaches you already tried that failed, what you were about to do next and what is
 blocking it, which files you touched, and the exact `file:line` spots that matter.
 
-Type `/handoff` and it hands you back a single line to paste elsewhere:
+Type `/handoff` and it hands you back two lines, because there are two different
+jobs and one line cannot serve both:
 
 ```
+Continue in a new chat or another window (same repo):
 Read C:\Users\you\.agents\handoffs\fix-checkout-latency.md and continue this work.
-Follow the Next action.
+You are Continuing, not Replicating: checkout-api is the repo this describes...
+
+Replicate in a different repo:
+Read C:\Users\you\.agents\handoffs\fix-checkout-latency.md. It describes work done
+in checkout-api. If that IS the repo you have open, stop and tell me...
 ```
 
-Paste that into any other window, in any project, and it picks up where you stopped.
+Pick the one that matches where you are pasting. **Continue** is the same repository —
+a new chat in the same window counts, and is the common case. **Replicate** is the same
+*kind* of work somewhere else, where the Next action names branches and paths that do
+not exist in your tree.
+
+Paste the wrong one and the agent stops and asks rather than guessing, because the
+handoff file records which repo and which chat wrote it. That check is the reason it
+records them.
 
 Run `/handoff` again later on the same work and it updates the same file rather than
 creating a second one — it recognises the thread even if you have started calling it
@@ -412,7 +425,7 @@ Then, in any AI chat:
 
 ```
 /remember      keep what we just worked out
-/handoff       save my place so another window can continue
+/handoff       save my place so a new chat or window can continue
 /recall        what do we already know about this?
 ```
 

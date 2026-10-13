@@ -1,7 +1,7 @@
 ---
 name: handoff
 version: 0.1.0
-description: Capture the working state of the current conversation into a portable handoff file, so an agent in a different VS Code window or a different repository can continue the work without the user re-explaining it. Use when the user says handoff, hand this off, save context, wrap this up, or continue this elsewhere.
+description: Capture the working state of the current conversation into a portable handoff file, so an agent in a new chat, a different VS Code window, or a different repository can continue the work without the user re-explaining it. Use when the user says handoff, hand this off, save context, wrap this up, or continue this elsewhere.
 license: MIT
 allowed-tools: Bash Read Write Glob
 triggers:
@@ -9,6 +9,7 @@ triggers:
   - hand this off
   - save context for another window
   - continue this in another repo
+  - pick this up in a new chat
 ---
 
 # handoff
@@ -77,6 +78,13 @@ Write-Output "--- LOG ---"
 git log --oneline -8 2>$null
 Write-Output "--- STATUS ---"
 git status --porcelain 2>$null
+Write-Output "--- ORIGIN ---"
+Write-Output "HOST=$env:COMPUTERNAME"
+$sid = $env:CLAUDE_CODE_SESSION_ID
+if (-not $sid) { $sid = $env:COPILOT_SESSION_ID }
+if (-not $sid) { $sid = 'unknown' }
+Write-Output "SESSION=$sid"
+Write-Output "CWD=$($PWD.Path)"
 Write-Output "UTC=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))"
 ```
 
@@ -93,6 +101,10 @@ echo "HEAD=$(git rev-parse --short HEAD 2>/dev/null)"
 echo "--- BRANCHES ---"; git branch --sort=-committerdate --format='%(refname:short)' 2>/dev/null | head -10
 echo "--- LOG ---"; git log --oneline -8 2>/dev/null
 echo "--- STATUS ---"; git status --porcelain 2>/dev/null
+echo "--- ORIGIN ---"
+echo "HOST=$(hostname -s 2>/dev/null)"
+echo "SESSION=${CLAUDE_CODE_SESSION_ID:-${COPILOT_SESSION_ID:-unknown}}"
+echo "CWD=$PWD"
 echo "UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
@@ -104,6 +116,13 @@ stages a change across two branches — one holding the old configuration for a 
 run, another carrying the new one — leaves the second branch invisible to
 `--show-current`, and a branch you were never shown is a branch you cannot record.
 Read the list before writing Execution protocol.
+
+`ORIGIN` is what lets a later reader work out *which* of three jobs it has. A repo path
+alone cannot: the same repository is open in the window that wrote this file, in the next
+chat the user starts on it tomorrow, and in the window they paste the replicate line into
+by mistake. `SESSION` separates the first two. `SESSION=unknown` is a normal result — not
+every agent exposes one — and costs only the Resuming row of the table in Step 3; Host and
+cwd still separate machines and trees.
 
 ---
 
@@ -142,14 +161,38 @@ repos:
     path: <absolute path>
     branch: <branch>
     head: <short sha>
-agent: copilot | claude-code
+surfaces:
+  - kind: <confluence | sharepoint | local-file | dashboard | ticket>
+    ref: <page id, path or URL — never a credential>
+origin:
+  agent: copilot | claude-code
+  session: <SESSION from Step 1, or `unknown`>
+  host: <HOST>
+  cwd: <CWD>
 ---
 
-> **If the repository you are reading this in is not listed under `repos:` above, you are
-> replicating this work, not continuing it.** Follow Execution protocol, re-derive every
-> path, branch name and version from the repository you are actually in, and read Next
-> action as a record of what happened elsewhere rather than as an instruction. Do not open
-> the repository this was written in.
+> **Work out which of these you are before you touch anything.** Read your own identity
+> first: `pwd` works on both shells, and for the session id use
+> `echo "${CLAUDE_CODE_SESSION_ID:-${COPILOT_SESSION_ID:-unknown}}"` on bash or
+> `$env:CLAUDE_CODE_SESSION_ID` on PowerShell. Then take the **first** row below that matches. The rows are ordered and they overlap
+> on purpose: the row that stops you is checked before the rows that let you work.
+
+| What you observe | You are | What this file is to you |
+|---|---|---|
+| you were told to replicate, but your repo IS under `repos:` | **Conflict — stop** | Checked first, because it also matches Continuing below and the wrong one is silent. Say so in one line and ask which repository was meant. Do not pick a reading: continuing redoes finished work, replicating duplicates it into the tree it already lives in. One question is cheaper than either. |
+| your session id equals `origin.session` | **Resuming** | The same chat, after a restart or a compaction. Next action is yours; do not re-derive what is already recorded here. |
+| session differs, and your repo IS under `repos:` | **Continuing** | A different chat — a new session in the same window counts — on the same tree. Next action applies, but read `git status` and `git log` first: `updated:` records when this was true, not that it still is. |
+| your repo is NOT under `repos:` | **Replicating** | Next action is wrong by construction — it names branches, paths and versions belonging to another tree. Follow Execution protocol, re-derive every specific from the repository you are actually in, and read Next action as a record of what happened elsewhere. Do not open the repository this was written in. |
+
+`origin.session` of `unknown` collapses Resuming into Continuing: you cannot tell the two
+apart, so take the safer one and re-check git state. Nothing else in the table changes.
+
+`status: done` overrides all four rows. There is no next action, only an outcome.
+Report what the file records and ask what is wanted before changing anything.
+
+A `surfaces:` entry with no counterpart in your repository is not replicable. Name it
+and leave it alone. Inventing a repo-side equivalent for a Confluence page or a file on
+someone's desktop is how a handoff turns into invented work.
 
 ## Orientation
 
@@ -204,6 +247,17 @@ Numbered. Only questions the user can answer.
 
 `State` in Uncommitted work comes from `git status --porcelain`: `modified`,
 `added`, `deleted`, `untracked`, `renamed`.
+
+`surfaces:` is `[]` when every part of the work lived inside a repository, and that is
+the common case. Fill it only for work with no file in any tree — a wiki page, a ticket,
+a dashboard, a file on the desktop. It exists because `repos:` quietly claims to describe
+the whole work surface, and a reader asked to replicate what is not in a repository will
+invent something rather than say it cannot.
+
+`origin.session` is whatever Step 1 printed, verbatim. Write `unknown` when Step 1 said
+so, and never substitute a different id: a session id that is wrong is worse than absent,
+because the Resuming row of the table above tells a reader to trust Next action without
+re-checking it.
 
 ### Quality rules
 
@@ -367,10 +421,12 @@ describe the same thing and the user should know.
 
 ## Step 8 — Print the pickup lines
 
-Two different jobs pick up a handoff, and one line cannot serve both.
+Three different jobs pick up a handoff, and one line cannot serve all of them.
 
-**Continuing** is the same work in another window: same repository, same branch, the
-Next action is the next thing to do.
+**Continuing** is the same work in another chat or another window: same repository,
+same branch, the Next action is the next thing to do. A new chat on the same repo is
+this case, not a fresh start — the context is in the file, so the user should not be
+retyping it.
 
 **Replicating** is the same *kind* of work in a different repository. There the Next
 action is wrong by construction — it names branches, paths and environments that
@@ -379,23 +435,40 @@ action" in a different repo will either execute the wrong step or go read the
 original repo off disk to work out what was meant, and both burn the user's credits
 to arrive somewhere worse than a cold start.
 
+Each pickup line now carries the claim it makes about where it is being pasted, so the
+reader can check that claim against `origin:` and `repos:` and refuse when it is false.
+That check is what the Conflict row in Step 3 exists for, and the line has to assert
+something for the row to catch it.
+
 End your reply with exactly this, and nothing after it:
 
 ```
 Handoff written: <absolute path to id.md>
-Thread: <id> (<created|updated>)
+Thread: <id> (<created|updated>) — status <status>, origin session <session>
 
-Continue in another window (same repo):
-Read <absolute path to id.md> and continue this work. Follow the Next action.
+Continue in a new chat or another window (same repo):
+Read <absolute path to id.md> and continue this work. You are Continuing, not
+Replicating: <repo name> is the repo this describes. Check git state against the
+file's `updated:` before you act on Next action.
 
 Replicate in a different repo:
-Read <absolute path to id.md>. It describes work done in <repo name>. Do the
-equivalent here: follow Execution protocol, and re-derive every specific — branch
-names, file paths, module versions — from this repository. Do not open <repo name>
-and do not assume its Next action applies. Tell me the plan before you edit.
+Read <absolute path to id.md>. It describes work done in <repo name>. If that IS the
+repo you have open, stop and tell me — I pasted the wrong line. Otherwise follow
+Execution protocol and re-derive every specific — branch names, file paths, module
+versions — from this repository. Do not open <repo name> and do not assume its Next
+action applies. Tell me the plan before you edit.
 ```
 
 Print both. The user knows which window they are pasting into; you do not.
+
+When `status: done`, print neither. There is nothing to continue and nothing whose
+Next action could be replicated. Print one Reference line instead:
+
+```
+Reference (this thread is done):
+Read <absolute path to id.md>. It records completed work in <repo name>; its Next
+action is already done. Tell me what you want from it before changing anything.
+```
 
 ---
 
@@ -413,6 +486,11 @@ Answer all six. If any is no, fix the file before writing it.
 4. Is Rejected approaches non-empty, or explicitly `None.`?
 5. Is every claim anchored to a path or a decision number?
 6. Is there a single secret, token, or connection string left in the body?
+7. Does `origin:` carry a session, host and cwd, so a reader in a new chat on this
+   same repo can tell Resuming from Continuing rather than guessing?
+8. Is every part of the work surface either under `repos:` or under `surfaces:`? Work
+   that lived in a wiki page, a ticket or a file outside the tree has no repo-side
+   equivalent, and a reader asked to replicate it will either invent one or stall.
 
 ---
 

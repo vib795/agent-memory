@@ -43,7 +43,7 @@ Three user-level Agent Skills over one local markdown store:
 
 | Skill | What it does |
 |---|---|
-| `/handoff` | Writes a portable working-state file so another window can pick up this thread |
+| `/handoff` | Writes a portable working-state file so a new chat, another window or another repo can pick up this thread |
 | `/remember` | Captures durable knowledge into a cross-repo graph — and fires on its own when a juncture passes |
 | `/recall` | Answers from that graph before deriving anything again |
 
@@ -472,7 +472,7 @@ equivalent and is not: npm links the global install to that folder rather than c
 it, which shows up as an arrow in `npm list -g`:
 
 ```
-`-- @vib795/agent-memory@0.8.1 -> .\..\..\..\agent-memory
+`-- @vib795/agent-memory@0.8.2 -> .\..\..\..\agent-memory
 ```
 
 Move or delete the clone afterwards and the global install points at nothing — the same
