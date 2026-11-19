@@ -203,24 +203,44 @@ export function layout(model, { width = 1200, height = 800 } = {}) {
       dy[b] += ddy * f;
     }
     for (let i = 0; i < n; i++) {
-      // Gentle pull to the centre keeps disconnected pieces on the canvas.
-      dx[i] += (cx - xs[i]) * 0.05;
-      dy[i] += (cy - ys[i]) * 0.05;
+      // A firm pull to the centre. Unlinked notes feel only repulsion, so a weak pull
+      // lets them drift far out, and fitting that spread to the canvas squeezes every
+      // linked note into an unreadable knot in the middle.
+      dx[i] += (cx - xs[i]) * 0.8;
+      dy[i] += (cy - ys[i]) * 0.8;
       const len = Math.sqrt(dx[i] * dx[i] + dy[i] * dy[i]);
       if (len > 0) {
         const step = Math.min(len, temp);
         xs[i] += (dx[i] / len) * step;
         ys[i] += (dy[i] / len) * step;
       }
-      xs[i] = Math.min(width - margin, Math.max(margin, xs[i]));
-      ys[i] = Math.min(height - margin, Math.max(margin, ys[i]));
     }
     temp = Math.max(temp - cool, 0.5);
   }
 
+  // Fit the settled layout to the canvas afterwards rather than clamping during the
+  // run: a clamp pins every node that drifts outward to the same wall, where they stack
+  // in a line and their labels overprint. One uniform scale keeps the shape the forces
+  // found, and the right edge keeps room for the label each node draws beside itself.
+  const LABEL_ROOM = 170;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < n; i++) {
+    minX = Math.min(minX, xs[i]); maxX = Math.max(maxX, xs[i]);
+    minY = Math.min(minY, ys[i]); maxY = Math.max(maxY, ys[i]);
+  }
+  const availW = width - 2 * margin - LABEL_ROOM;
+  const availH = height - 2 * margin;
+  const bw = maxX - minX || 1;
+  const bh = maxY - minY || 1;
+  const scale = Math.min(availW / bw, availH / bh);
+  const offX = margin + (availW - bw * scale) / 2;
+  const offY = margin + (availH - bh * scale) / 2;
+
   const out = {};
   for (let i = 0; i < n; i++) {
-    out[ids[i]] = { x: Math.round(xs[i] * 10) / 10, y: Math.round(ys[i] * 10) / 10 };
+    const x = offX + (xs[i] - minX) * scale;
+    const y = offY + (ys[i] - minY) * scale;
+    out[ids[i]] = { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
   }
   return out;
 }

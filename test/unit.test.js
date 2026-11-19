@@ -374,6 +374,30 @@ test('view html: strict CSP and nothing loaded from anywhere', () => {
   );
 });
 
+test('view layout: unlinked notes spread out inside the canvas, not stacked on a wall', () => {
+  // protects=a readable graph when many notes have no edges; fails_when=nodes are
+  // clamped to the canvas edge and pile up on one line, or labels run off the right edge;
+  // no_claim=labels never overlap (only node centres are checked).
+  const notes = [vn('hub', 'system', [{ rel: 'depends-on', dst: 'leaf' }]), vn('leaf', 'decision')];
+  for (let i = 0; i < 15; i++) notes.push(vn(`lonely-${String(i).padStart(2, '0')}`, 'convention'));
+  const m = view.buildViewModel(notes, { engagement: 'default', generated: 'x' });
+  const pos = Object.values(view.layout(m, { width: 1200, height: 800 }));
+  for (const p of pos) {
+    assert.ok(p.x >= 30 && p.x <= 1200 - 30 - 170, `x ${p.x} leaves room for the label`);
+    assert.ok(p.y >= 30 && p.y <= 800 - 30, `y ${p.y} inside the canvas`);
+  }
+  let minD = Infinity;
+  for (let i = 0; i < pos.length; i++) {
+    for (let j = i + 1; j < pos.length; j++) {
+      minD = Math.min(minD, Math.hypot(pos[i].x - pos[j].x, pos[i].y - pos[j].y));
+    }
+  }
+  assert.ok(minD > 20, `closest pair ${minD.toFixed(1)}px apart`);
+  const rows = new Map();
+  for (const p of pos) rows.set(p.y, (rows.get(p.y) || 0) + 1);
+  assert.ok(Math.max(...rows.values()) <= 2, 'no row of nodes stacked on one y');
+});
+
 test('view html: the same notes and timestamp give byte-identical output', () => {
   // protects=determinism of model, layout and html; fails_when=a clock, Math.random or
   // input order leaks into the bytes; no_claim=identical output across Node versions.

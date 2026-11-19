@@ -370,6 +370,7 @@ agent-memory write --from-json <file>      validated upsert; used by the skills
                      --from-json -         read the JSON from stdin instead
 agent-memory compact                       dedup, decay, reindex, regenerate
 agent-memory doctor                        preflight and health report
+agent-memory view [--no-open] [--archived] the store as one HTML graph, with audits
 ```
 
 Every command takes `--json`. Every cap lives in `config.json` and is tunable.
@@ -401,6 +402,7 @@ What the working directory changes is *scope*, never location.
 | `tree` | whole store | **filters it** — defaults to the current repo |
 | `brief` | whole store | **filters it** — the same scoping as `tree` |
 | `write` | whole store | **is stamped into the note** — see below |
+| `view` | whole store | staleness is measured only for this repo's notes; the rest show as `unchecked` |
 
 The current repo is `git rev-parse --show-toplevel` reduced to its directory name.
 Outside a git repository it is `null` and every command still works: `tree` comes
@@ -441,12 +443,39 @@ Only `init` is a once-per-machine command, and `agent-memory setup` already ran 
 | `index` | repair only — `write` reindexes on every call. Run it after hand-editing or deleting notes, or after deleting `index.db` |
 | `compact` | occasionally. Nothing schedules it: no daemon, no cron, no hook |
 | `doctor` | after install, after an upgrade, and whenever something looks wrong |
+| `view` | whenever you want to see the graph, or check it for problems |
 
 **You will not type most of these.** `/remember` and `/handoff` call `write`;
 `/recall` calls `tree`, `get` and `search`. They are documented so you can see what
 the skills are doing and drive it by hand when you want to, but the daily loop is
 two slash commands in a chat box. The ones a person actually types are `setup`,
-`doctor`, and `compact` now and then.
+`doctor`, `view`, and `compact` now and then.
+
+### Seeing the graph
+
+`agent-memory view` writes `~/.agents/memory/view.html` and opens it in your
+browser. It is one self-contained file: the graph is drawn as static SVG, so it shows
+even with scripts off, and a strict content security policy stops the page loading
+anything from anywhere. Click a note for its body, frontmatter, neighbours and
+staleness; filter by type, repo or text.
+
+Across the top it counts what nothing else surfaces:
+
+| Audit | Means |
+|---|---|
+| orphans | live notes with no edges, so nothing leads to them |
+| dangling | an edge pointing at an id that does not exist |
+| contradictions | every `contradicts` edge, so you can settle them |
+| stale | captured 10+ commits ago (the `staleAnnotateCommits` cap) |
+| broken | a note file that does not parse |
+| unchecked | notes from other repos, whose staleness cannot be measured from here |
+
+A zero still prints as `0`: a missing count would read as "fine". The command is
+read-only. It never opens `index.db` and never touches `accessed`, so looking at the
+graph does not change what decay later archives. The page carries every note body;
+secrets were removed at capture, personal details were not, so treat it like the
+store and do not send it on. Run it from inside a repository to get that repository's
+real stale count.
 
 ## Install
 
@@ -593,7 +622,7 @@ them as skipped, which is the intended outcome, not a failure.
 
 Needs Node 22.16 or newer; `doctor` says so plainly if the version is too old.
 
-Run `npm test` for the suite (113 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (126 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 
