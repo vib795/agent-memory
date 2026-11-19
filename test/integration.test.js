@@ -1910,7 +1910,16 @@ test('view --no-open writes the page, prints path and audits, and changes nothin
   try {
     const r = runView(['--no-open'], outside);
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.stderr, '');
+    // Node 22 prints an ExperimentalWarning the moment any module loads node:sqlite, and
+    // cli.js does at import time, for every command. That line is the runtime's, not
+    // this command's; anything else on stderr still fails here.
+    const ownStderr = r.stderr
+      .split('\n')
+      .filter((l) => !/ExperimentalWarning: SQLite is an experimental feature/.test(l)
+        && !/^\(Use `node --trace-warnings/.test(l))
+      .join('\n')
+      .trim();
+    assert.equal(ownStderr, '');
     const pathLine = r.stdout.split('\n')[0];
     assert.equal(pathLine, `view: ${paths.view}`);
     assert.ok(isAbsolute(pathLine.slice('view: '.length)));
