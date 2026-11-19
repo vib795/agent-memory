@@ -3,7 +3,7 @@
 How agent-memory is built, and why it is built that way.
 
 Every figure here was read from the source rather than written from memory, at
-v0.9.2: 17 modules, 5,461 lines of JavaScript, zero
+v0.9.2: 17 modules, 6,048 lines of JavaScript, zero
 runtime dependencies and zero dev dependencies, 129 tests.
 
 ---
@@ -506,7 +506,7 @@ The properties that must stay true. Each is covered by the test suite.
 |---|--:|---|
 | `cli.js` | 1175 | 15 commands; one process, one answer |
 | `digest.js` | 559 | tiers 1 and 2: both descriptions, tree, brief |
-| `view.js` | 1196 | read-only HTML graph snapshot with audits; no index, no network |
+| `view.js` | 1783 | read-only HTML graph snapshot with audits; no index, no network |
 | `compact.js` | 372 | dedupe, supersede, decay, regenerate |
 | `index-db.js` | 317 | SQLite cache: DDL, reindex, FTS5 search |
 | `setup.js` | 297 | install into detected agent surfaces |
@@ -521,7 +521,7 @@ The properties that must stay true. Each is covered by the test suite.
 | `promptfile.js` | 78 | VS Code prompt files derived from SKILL.md |
 | `atomic.js` | 59 | atomic write; imports nothing from this package |
 | `bin.js` | 33 | the Node floor, checked before the module graph loads |
-| **total** | **5,461** | zero dependencies, 129 tests |
+| **total** | **6,048** | zero dependencies, 129 tests |
 
 `atomic.js` deliberately imports nothing from the package: `store.js` already imports
 `config.js`, so putting the atomic write in either would create a cycle.
@@ -545,9 +545,13 @@ passes make it legible: separate clusters are packed side by side rather than le
 in opposite corners, any two notes whose label boxes would overprint are pushed apart,
 and the viewBox is framed to what was drawn so the graph fills its panel. Label widths
 are estimates (Node has no fonts), set generously so a real label is never wider. The
-inline script adds pan and zoom (the viewBox is the camera), filtering, the audit
-lists and the detail pane; styling is one set of colour tokens that dark mode
-redefines. The
+inline script then takes that static frame as its starting point: a small force
+simulation (link springs, short-range repulsion, collision that accounts for label
+width) runs in the page, so notes can be dragged and the graph reflows when a filter
+or a 1-hop/2-hop scope hides notes. Labels are shown by zoom level and focus and keep
+one size on screen; hover fades everything outside a note's neighbourhood; details
+open in a drawer. The viewBox is the camera. Styling is one set of colour tokens that
+dark mode redefines. The
 page's data sits in a `type="application/json"` block with `<`, `>`, `&`, U+2028 and
 U+2029 escaped, and every piece of note text reaches the DOM through `textContent`,
 because note bodies are pasted text and some of it will look like markup. A CSP of
