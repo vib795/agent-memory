@@ -419,6 +419,7 @@ node --version                          # must be 22.16+
 npm install -g @vib795/agent-memory     # 1. download
 agent-memory setup                      # 2. install into your AI tools
 agent-memory doctor                     # is everything OK?
+agent-memory view                       # your notes as a graph, problems flagged
 ```
 
 Then, in any AI chat:

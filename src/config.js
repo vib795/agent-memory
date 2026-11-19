@@ -84,6 +84,7 @@ export const paths = {
   archive: join(STORE_ROOT, 'notes', 'archive'),
   db: join(STORE_ROOT, 'index.db'),
   routing: join(STORE_ROOT, 'ROUTING.md'),
+  view: join(STORE_ROOT, 'view.html'),
   config: join(STORE_ROOT, 'config.json'),
   // Machine-scoped keys live beside every engagement rather than inside one.
   machineConfig: join(STORE_BASE, 'config.json'),

@@ -258,3 +258,183 @@ test('saveConfig deduplicates and sorts skill paths', () => {
   saveConfig({ skillPaths: ['/b/SKILL.md', '/a/SKILL.md', '/b/SKILL.md'] });
   assert.deepEqual(loadConfig().skillPaths, ['/a/SKILL.md', '/b/SKILL.md']);
 });
+
+// --- view ---------------------------------------------------------------------
+
+const view = await import('../src/view.js');
+
+/** A note shaped like one listNotes() returns. */
+const vn = (id, type, edges = [], extra = {}) => ({
+  id, type, title: `Title of ${id}`, body: `Body of ${id}`, repos: [], edges, archived: 0,
+  path: `/fixture/${type}/${id}.md`, ...extra,
+});
+
+test('view model: files with no id are each reported broken, not merged into one node', () => {
+  // protects=audits.broken for frontmatter that parses but has no id; fails_when=two such
+  // files collapse onto one `undefined` key and one disappears, or a nameless node is
+  // drawn; no_claim=what listNotes() does with such a file.
+  const notes = [
+    vn('real', 'system'),
+    { ...vn(undefined, 'decision'), path: '/fixture/decision/x.md' },
+    { ...vn('', 'decision'), path: '/fixture/decision/y.md' },
+  ];
+  const m = view.buildViewModel(notes);
+  assert.deepEqual(m.nodes.map((n) => n.id), ['real']);
+  assert.deepEqual(m.audits.broken.map((b) => b.path), ['/fixture/decision/x.md', '/fixture/decision/y.md']);
+});
+
+test('view staleness: a SHA with no repository is unchecked, never measured here', () => {
+  // protects=makeStaleFn's provenance rule; fails_when=a repo-less capture is counted
+  // against whatever checkout is open and reported stale or rewritten; no_claim=behaviour
+  // outside a git checkout (covered by the integration test).
+  const fn = view.makeStaleFn({ cfg: { staleAnnotateCommits: 10 } });
+  assert.equal(fn({ id: 'g', captured_sha: 'deadbeef'.repeat(5), repos: [] }), 'unchecked');
+  assert.equal(fn({ id: 'g2', captured_sha: 'deadbeef'.repeat(5) }), 'unchecked');
+  assert.equal(fn({ id: 'n', repos: [] }), null, 'no SHA, nothing to measure');
+});
+
+test('view model: a note with no edges in or out is the one orphan', () => {
+  // protects=audits.orphans; fails_when=a note reached only by an incoming edge, or one
+  // whose only edge touches an archived note, is reported as an orphan; no_claim=that
+  // the graph drawing places orphans anywhere in particular.
+  const m = view.buildViewModel([
+    vn('lone', 'convention'),
+    vn('a', 'system', [{ rel: 'depends-on', dst: 'b' }]),
+    vn('b', 'system'),
+    vn('c', 'decision', [{ rel: 'applies-to', dst: 'old' }]),
+    vn('old', 'decision', [], { archived: 1 }),
+  ]);
+  assert.deepEqual(m.audits.orphans, ['lone']);
+  assert.equal(m.nodes.find((n) => n.id === 'b').degree, 1, 'incoming edges count');
+});
+
+test('view model: an edge to a missing id is dangling and does not count as a link', () => {
+  // protects=audits.dangling and degree; fails_when=a dangling edge is missed, or makes
+  // its source look connected; no_claim=how an edge into an unparseable note is shown
+  // (its id is unreadable, so such an edge is dangling too).
+  const m = view.buildViewModel([
+    vn('src', 'decision', [{ rel: 'depends-on', dst: 'ghost' }, { rel: 'applies-to', dst: 'real' }]),
+    vn('real', 'system'),
+    vn('only-dangling', 'convention', [{ rel: 'depends-on', dst: 'ghost' }]),
+  ]);
+  assert.deepEqual(m.audits.dangling, [
+    { src: 'only-dangling', rel: 'depends-on', dst: 'ghost' },
+    { src: 'src', rel: 'depends-on', dst: 'ghost' },
+  ]);
+  assert.equal(m.nodes.find((n) => n.id === 'src').degree, 1, 'only the real edge counts');
+  assert.deepEqual(m.audits.orphans, ['only-dangling'], 'a dangling edge alone is no connection');
+});
+
+test('view model: every contradicts edge is reported, and its ends are not orphans', () => {
+  // protects=audits.contradictions; fails_when=a contradicts edge is dropped or its
+  // direction swapped; no_claim=that the two notes really disagree.
+  const m = view.buildViewModel([
+    vn('x', 'system', [{ rel: 'contradicts', dst: 'y' }]),
+    vn('y', 'system'),
+  ]);
+  assert.deepEqual(m.audits.contradictions, [{ a: 'x', b: 'y' }]);
+  assert.deepEqual(m.audits.orphans, []);
+});
+
+test('view model: an unparseable note is listed as broken, never as a node', () => {
+  // protects=audits.broken; fails_when=a parse failure is silently dropped or rendered
+  // as an empty node; no_claim=anything about the wording of the parse error.
+  const err = '/fixture/system/bad.md: missing frontmatter';
+  const m = view.buildViewModel([
+    vn('ok', 'system'),
+    { __error: err, path: '/fixture/system/bad.md', id: 'bad', type: 'system', archived: 0 },
+  ]);
+  assert.deepEqual(m.audits.broken, [{ path: '/fixture/system/bad.md', error: err }]);
+  assert.deepEqual(m.nodes.map((n) => n.id), ['ok']);
+});
+
+test('view model: archived notes are drawn but never audited as orphan or stale', () => {
+  // protects=archived exclusion from orphans and stale; fails_when=an archived note
+  // inflates an audit count or is dropped from nodes; no_claim=that the real staleFn
+  // is correct (stubbed here; the git-backed path is tested in integration).
+  const staleFn = (n) => (n.id === 'fresh' ? null : { status: 'stale', commits: 40 });
+  const m = view.buildViewModel([
+    vn('gone', 'system', [], { archived: 1, captured_sha: 'abc1234' }),
+    vn('old-active', 'system', [{ rel: 'depends-on', dst: 'fresh' }], { captured_sha: 'abc1234' }),
+    vn('fresh', 'system'),
+  ], { staleFn });
+  assert.equal(m.nodes.find((n) => n.id === 'gone').archived, 1);
+  assert.deepEqual(m.audits.orphans, []);
+  assert.deepEqual(m.audits.stale, ['old-active']);
+  assert.equal(m.nodes.find((n) => n.id === 'gone').stale, null);
+});
+
+test('view html: a script-breaking note body stays inert text', () => {
+  // protects=note content cannot script the page; fails_when=a body or title closes
+  // the data script or lands an <img onerror> in markup; no_claim=browser-side
+  // textContent use (inline script; covered by the manual checklist).
+  const evil = `</script><img src=x onerror=alert(1)>${String.fromCharCode(0x2028)}`;
+  const m = view.buildViewModel([vn('evil', 'system', [], { body: evil, title: evil })], { generated: 'T' });
+  const html = view.renderHtml(m, view.layout(m));
+  assert.equal(html.match(/<\/script>/gi).length, 2);
+  assert.equal(html.match(/<script/gi).length, 2);
+  assert.doesNotMatch(html, /<img src=x/i);
+  const data = /<script type="application\/json" id="data">([^]*?)<\/script>/.exec(html)[1];
+  assert.ok(!data.includes(String.fromCharCode(0x2028)), 'no raw line separator inside script');
+  assert.equal(JSON.parse(data).nodes[0].body, evil, 'the body still round-trips intact');
+});
+
+test('view html: strict CSP and nothing loaded from anywhere', () => {
+  // protects=the page is self-contained; fails_when=the template references external
+  // script, styles, imports or URLs, or the CSP string drifts; no_claim=that a browser
+  // honours a meta-tag CSP on a file:// page.
+  const html = view.renderHtml(view.buildViewModel([], { generated: 'T' }), {});
+  assert.ok(html.includes(
+    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">`,
+  ));
+  assert.doesNotMatch(html, /<script[^>]+src=/i);
+  assert.doesNotMatch(html, /<link\b/i);
+  assert.doesNotMatch(html, /@import/i);
+  assert.doesNotMatch(html, /https?:\/\//i);
+  assert.match(
+    html,
+    /orphans <b>0<\/b>.*dangling <b>0<\/b>.*contradictions <b>0<\/b>.*stale <b>0<\/b>.*broken <b>0<\/b>.*unchecked <b>0<\/b>/s,
+    'zero counts are shown, in the fixed order',
+  );
+});
+
+test('view layout: unlinked notes spread out inside the canvas, not stacked on a wall', () => {
+  // protects=a readable graph when many notes have no edges; fails_when=nodes are
+  // clamped to the canvas edge and pile up on one line, or labels run off the right edge;
+  // no_claim=labels never overlap (only node centres are checked).
+  const notes = [vn('hub', 'system', [{ rel: 'depends-on', dst: 'leaf' }]), vn('leaf', 'decision')];
+  for (let i = 0; i < 15; i++) notes.push(vn(`lonely-${String(i).padStart(2, '0')}`, 'convention'));
+  const m = view.buildViewModel(notes, { engagement: 'default', generated: 'x' });
+  const pos = Object.values(view.layout(m, { width: 1200, height: 800 }));
+  for (const p of pos) {
+    assert.ok(p.x >= 30 && p.x <= 1200 - 30 - 170, `x ${p.x} leaves room for the label`);
+    assert.ok(p.y >= 30 && p.y <= 800 - 30, `y ${p.y} inside the canvas`);
+  }
+  let minD = Infinity;
+  for (let i = 0; i < pos.length; i++) {
+    for (let j = i + 1; j < pos.length; j++) {
+      minD = Math.min(minD, Math.hypot(pos[i].x - pos[j].x, pos[i].y - pos[j].y));
+    }
+  }
+  assert.ok(minD > 20, `closest pair ${minD.toFixed(1)}px apart`);
+  const rows = new Map();
+  for (const p of pos) rows.set(p.y, (rows.get(p.y) || 0) + 1);
+  assert.ok(Math.max(...rows.values()) <= 2, 'no row of nodes stacked on one y');
+});
+
+test('view html: the same notes and timestamp give byte-identical output', () => {
+  // protects=determinism of model, layout and html; fails_when=a clock, Math.random or
+  // input order leaks into the bytes; no_claim=identical output across Node versions.
+  const notes = () => [
+    vn('b', 'decision', [{ rel: 'contradicts', dst: 'a' }]),
+    vn('a', 'system', [{ rel: 'depends-on', dst: 'c' }]),
+    vn('c', 'constraint'),
+    vn('d', 'convention', [], { archived: 1 }),
+  ];
+  const render = (list) => {
+    const m = view.buildViewModel(list, { engagement: 'default', generated: '2026-01-01T00:00:00.000Z' });
+    return view.renderHtml(m, view.layout(m));
+  };
+  assert.equal(render(notes()), render(notes()));
+  assert.equal(render(notes()), render(notes().reverse()), 'input order does not leak');
+});

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, existsSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
 import {
   loadConfig, saveConfig, paths, NOTE_TYPES, ENGAGEMENT, ENGAGEMENT_RE, ENGAGEMENT_POINTER,
   ENGAGEMENT_MARKER, DEFAULT_ENGAGEMENT, STORE_BASE, engagementRoot,
@@ -21,6 +21,7 @@ import { join, dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWrite } from './atomic.js';
 import { redactNodeForExport, buildReceipt, renderReceipt } from './pii.js';
+import { buildViewModel, layout, renderHtml, renderSummary, makeStaleFn } from './view.js';
 
 /**
  * One process, one answer.
@@ -131,6 +132,7 @@ const USAGE = `agent-memory — durable cross-repo knowledge for coding agents
   import <file> [--dry-run]              bring an export in, provenance intact
   engagement [show|list|use <name>]      which client store this window writes to
              [purge <name> --yes]        delete one engagement's store entirely
+  view [--no-open] [--archived]          self-contained HTML graph + audits
 
   --version                              this version, and the path it runs from
 
@@ -1038,6 +1040,64 @@ function listEngagements() {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Write the store as one self-contained HTML page and open it.
+ *
+ * Read-only by construction: it reads markdown through listNotes() and never opens
+ * the index, so it cannot create index.db, stamp `accessed`, or trigger a compact.
+ * Looking at the graph must not change what decay later decides about it.
+ */
+function cmdView(opts) {
+  ensureStore();
+  const notes = listNotes();
+  const cfg = loadConfig();
+  const model = buildViewModel(notes, {
+    staleFn: makeStaleFn({ cfg }),
+    engagement: ENGAGEMENT.name,
+    generated: new Date().toISOString(),
+  });
+  const html = renderHtml(model, layout(model), { showArchived: !!opts.archived });
+  // Owner-only: the page carries every note body, and a store whose notes/ was locked
+  // down should not leak them through a world-readable snapshot beside it.
+  atomicWrite(paths.view, html, { mode: 0o600 });
+  const summary = renderSummary(model);
+
+  if (!opts['no-open']) openInBrowser(paths.view);
+
+  const counts = Object.fromEntries(
+    Object.entries(model.audits).map(([k, v]) => [k, typeof v === 'number' ? v : v.length]),
+  );
+  return { ok: true, path: paths.view, audits: counts, text: `view: ${paths.view}\n${summary}` };
+}
+
+/** Hand a file to the desktop's default handler. No shell; failure is not fatal. */
+function openInBrowser(file) {
+  let cmd;
+  let args;
+  let extra = {};
+  if (process.platform === 'darwin') {
+    cmd = 'open';
+    args = [file];
+  } else if (process.platform === 'win32') {
+    // `start` is a cmd builtin. Its first quoted argument is a window title, hence the
+    // empty one; verbatim arguments keep Node from re-escaping those quotes.
+    cmd = 'cmd';
+    args = ['/c', 'start', '""', `"${file}"`];
+    extra = { windowsVerbatimArguments: true };
+  } else {
+    cmd = 'xdg-open';
+    args = [file];
+  }
+  // stderr, not stdout: `view --json` prints a JSON result on stdout, and a trailing
+  // plain-text line there would make a successful run unparseable.
+  const fail = () => process.stderr.write('could not open a browser; open the file above by hand\n');
+  try {
+    execFile(cmd, args, { ...extra, timeout: 15000 }, (err) => { if (err) fail(); });
+  } catch {
+    fail();
+  }
+}
+
 const COMMANDS = {
   setup: cmdSetup,
   uninstall: cmdUninstall,
@@ -1053,6 +1113,7 @@ const COMMANDS = {
   engagement: cmdEngagement,
   export: cmdExport,
   import: cmdImport,
+  view: cmdView,
 };
 
 function main(argv) {
