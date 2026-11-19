@@ -393,33 +393,67 @@ test('view html: strict CSP and nothing loaded from anywhere', () => {
   assert.doesNotMatch(html, /https?:\/\//i);
   assert.match(
     html,
-    /orphans <b>0<\/b>.*dangling <b>0<\/b>.*contradictions <b>0<\/b>.*stale <b>0<\/b>.*broken <b>0<\/b>.*unchecked <b>0<\/b>/s,
+    /data-audit="orphans"[^>]*><span class="n">0<.*data-audit="dangling"[^>]*><span class="n">0<.*data-audit="contradictions"[^>]*><span class="n">0<.*data-audit="stale"[^>]*><span class="n">0<.*data-audit="broken"[^>]*><span class="n">0<.*data-audit="unchecked"[^>]*><span class="n">0</s,
     'zero counts are shown, in the fixed order',
   );
 });
 
-test('view layout: unlinked notes spread out inside the canvas, not stacked on a wall', () => {
-  // protects=a readable graph when many notes have no edges; fails_when=nodes are
-  // clamped to the canvas edge and pile up on one line, or labels run off the right edge;
-  // no_claim=labels never overlap (only node centres are checked).
+test('view layout: unlinked notes sit on a tidy shelf below the graph, not scattered through it', () => {
+  // protects=a readable graph when many notes have no edges; fails_when=unlinked notes
+  // are placed among the linked ones, overlap each other, or run off the canvas;
+  // no_claim=the exact grid metrics.
   const notes = [vn('hub', 'system', [{ rel: 'depends-on', dst: 'leaf' }]), vn('leaf', 'decision')];
   for (let i = 0; i < 15; i++) notes.push(vn(`lonely-${String(i).padStart(2, '0')}`, 'convention'));
   const m = view.buildViewModel(notes, { engagement: 'default', generated: 'x' });
-  const pos = Object.values(view.layout(m, { width: 1200, height: 800 }));
-  for (const p of pos) {
-    assert.ok(p.x >= 30 && p.x <= 1200 - 30 - 170, `x ${p.x} leaves room for the label`);
-    assert.ok(p.y >= 30 && p.y <= 800 - 30, `y ${p.y} inside the canvas`);
+  const pos = view.layout(m, { width: 1200, height: 800 });
+  const box = view.sceneBox(m, pos);
+  for (const id of ['hub', 'leaf']) {
+    assert.ok(pos[id].y < 800 && pos[id].x > 0 && pos[id].x < 1200, `${id} stays in the graph area`);
+  }
+  const graphBottom = Math.max(pos.hub.y, pos.leaf.y);
+  const shelf = Object.keys(pos).filter((id) => id.startsWith('lonely-')).map((id) => pos[id]);
+  assert.equal(shelf.length, 15);
+  for (const p of shelf) {
+    assert.ok(p.y > graphBottom + 20 && p.y < box.y + box.h, `shelf y ${p.y} is below the graph and inside the frame`);
+    assert.ok(p.x > box.x && p.x + 180 <= box.x + box.w, `shelf x ${p.x} leaves a column for its label`);
   }
   let minD = Infinity;
-  for (let i = 0; i < pos.length; i++) {
-    for (let j = i + 1; j < pos.length; j++) {
-      minD = Math.min(minD, Math.hypot(pos[i].x - pos[j].x, pos[i].y - pos[j].y));
+  for (let i = 0; i < shelf.length; i++) {
+    for (let j = i + 1; j < shelf.length; j++) {
+      minD = Math.min(minD, Math.hypot(shelf[i].x - shelf[j].x, shelf[i].y - shelf[j].y));
     }
   }
-  assert.ok(minD > 20, `closest pair ${minD.toFixed(1)}px apart`);
-  const rows = new Map();
-  for (const p of pos) rows.set(p.y, (rows.get(p.y) || 0) + 1);
-  assert.ok(Math.max(...rows.values()) <= 2, 'no row of nodes stacked on one y');
+  assert.ok(minD >= 30, `closest shelf pair ${minD.toFixed(1)}px apart`);
+});
+
+test('view layout: labels of linked notes never overprint each other', () => {
+  // protects=the declutter pass; fails_when=two linked notes' label boxes (circle plus
+  // the label drawn under it) intersect, which is the overlap the first release shipped
+  // with; no_claim=labels clear every edge line.
+  const leaves = Array.from({ length: 11 }, (_, i) => `a-rather-long-note-identifier-${i}`);
+  const notes = [vn('hub', 'system', leaves.map((dst) => ({ rel: 'depends-on', dst })))];
+  for (const id of leaves) notes.push(vn(id, 'decision', [{ rel: 'relates-to', dst: 'chain-end' }]));
+  notes.push(vn('chain-end', 'convention'));
+  const m = view.buildViewModel(notes, { engagement: 'default', generated: 'x' });
+  const pos = view.layout(m, { width: 1200, height: 800 });
+  const box = (n) => {
+    const r = view.nodeRadius(n.degree);
+    const w = Math.max(view.labelWidth(n.id), 2 * r);
+    const p = pos[n.id];
+    return { l: p.x - w / 2, r: p.x + w / 2, t: p.y - r, b: p.y + r + 20 };
+  };
+  const boxes = m.nodes.map((n) => [n.id, box(n)]);
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const [ia, a] = boxes[i];
+      const [ib, b] = boxes[j];
+      const overlap = a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+      assert.ok(!overlap, `${ia} and ${ib} overprint`);
+    }
+  }
+  for (const [id, b] of boxes) {
+    assert.ok(b.l >= 0 && b.r <= 1200 && b.t >= 0 && b.b <= 800, `${id} is inside the canvas`);
+  }
 });
 
 test('view html: the same notes and timestamp give byte-identical output', () => {

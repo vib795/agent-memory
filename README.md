@@ -456,10 +456,13 @@ two slash commands in a chat box. The ones a person actually types are `setup`,
 `agent-memory view` writes `~/.agents/memory/view.html` and opens it in your
 browser. It is one self-contained file: the graph is drawn as static SVG, so it shows
 even with scripts off, and a strict content security policy stops the page loading
-anything from anywhere. Click a note for its body, frontmatter, neighbours and
-staleness; filter by type, repo or text.
+anything from anywhere. Linked notes form the graph; notes with no links sit on a shelf
+beneath it. Scroll to zoom, drag to pan (pinch on a phone), click a note for its body,
+links, staleness and frontmatter, and filter by type, repo or text (`/` focuses
+search). Light and dark follow your system, and the layout stacks on a narrow screen.
 
-Across the top it counts what nothing else surfaces:
+Across the top, one card per audit counts what nothing else surfaces; click a card to
+highlight those notes and list them:
 
 | Audit | Means |
 |---|---|
@@ -622,7 +625,7 @@ them as skipped, which is the intended outcome, not a failure.
 
 Needs Node 22.16 or newer; `doctor` says so plainly if the version is too old.
 
-Run `npm test` for the suite (128 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (129 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 
