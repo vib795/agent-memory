@@ -3,8 +3,8 @@
 How agent-memory is built, and why it is built that way.
 
 Every figure here was read from the source rather than written from memory, at
-v0.8.2: 16 modules, 4,201 lines of JavaScript, zero runtime dependencies and zero
-dev dependencies, 113 tests.
+v0.8.2 plus the local `view` command: 17 modules, 4,808 lines of JavaScript, zero
+runtime dependencies and zero dev dependencies, 125 tests.
 
 ---
 
@@ -504,15 +504,16 @@ The properties that must stay true. Each is covered by the test suite.
 
 | Module | Lines | Responsibility |
 |---|--:|---|
-| `cli.js` | 1114 | 14 commands; one process, one answer |
+| `cli.js` | 1171 | 15 commands; one process, one answer |
 | `digest.js` | 559 | tiers 1 and 2: both descriptions, tree, brief |
+| `view.js` | 549 | read-only HTML graph snapshot with audits; no index, no network |
 | `compact.js` | 372 | dedupe, supersede, decay, regenerate |
 | `index-db.js` | 317 | SQLite cache: DDL, reindex, FTS5 search |
 | `setup.js` | 297 | install into detected agent surfaces |
 | `pii.js` | 274 | export-time disclosure control |
 | `store.js` | 256 | notes as source of truth; frontmatter; atomic upsert |
 | `staleness.js` | 213 | commit-distance staleness and capture gap |
-| `config.js` | 197 | engagement resolution; two-file config split |
+| `config.js` | 198 | engagement resolution; two-file config split |
 | `targets.js` | 140 | where each agent looks for instructions |
 | `graph.js` | 99 | recursive CTE traversal + retrieval budget |
 | `schema.js` | 98 | validate and normalize; reports every problem |
@@ -520,7 +521,7 @@ The properties that must stay true. Each is covered by the test suite.
 | `promptfile.js` | 78 | VS Code prompt files derived from SKILL.md |
 | `atomic.js` | 57 | atomic write; imports nothing from this package |
 | `bin.js` | 33 | the Node floor, checked before the module graph loads |
-| **total** | **4,201** | zero dependencies, 113 tests |
+| **total** | **4,808** | zero dependencies, 125 tests |
 
 `atomic.js` deliberately imports nothing from the package: `store.js` already imports
 `config.js`, so putting the atomic write in either would create a cycle.

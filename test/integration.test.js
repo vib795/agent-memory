@@ -6,7 +6,7 @@ import {
 } from 'node:fs';
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, basename } from 'node:path';
+import { join, basename, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = mkdtempSync(join(tmpdir(), 'agent-memory-int-'));
@@ -1845,4 +1845,203 @@ test('a long collision body is clipped on a boundary and says where the rest is'
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+// --- view -----------------------------------------------------------------------
+
+const { createHash } = await import('node:crypto');
+const view = await import('../src/view.js');
+
+const SUMMARY_RE =
+  /^orphans (\d+) · dangling (\d+) · contradictions (\d+) · stale (\d+) · broken (\d+) · unchecked (\d+)$/m;
+
+/** Every file under notes/, by relative path, mapped to its sha256. */
+function hashNotes() {
+  const out = {};
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const full = join(d, e.name);
+      if (e.isDirectory()) walk(full);
+      else out[full.slice(paths.notes.length)] = createHash('sha256').update(readFileSync(full)).digest('hex');
+    }
+  };
+  walk(paths.notes);
+  return out;
+}
+
+/** An empty store with no index, so a run that opens the database is visible. */
+function freshViewStore() {
+  rmSync(paths.notes, { recursive: true, force: true });
+  for (const f of [paths.db, `${paths.db}-wal`, `${paths.db}-shm`, paths.view]) rmSync(f, { force: true });
+}
+
+function runView(args, cwd) {
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const res = spawnSync(process.execPath, [cli, 'view', ...args], {
+    cwd,
+    env: { ...process.env, AGENT_MEMORY_HOME: ROOT, AGENT_MEMORY_ENGAGEMENT: 'default' },
+    encoding: 'utf8',
+  });
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr };
+}
+
+function embeddedModel() {
+  const html = readFileSync(paths.view, 'utf8');
+  return JSON.parse(/<script type="application\/json" id="data">([^]*?)<\/script>/.exec(html)[1]);
+}
+
+test('view --no-open writes the page, prints path and audits, and changes nothing else', () => {
+  // protects=the read-only guarantee and the CLI contract (exit 0, `view: <abs path>`,
+  // the six-count summary); fails_when=the run creates index.db, rewrites any note
+  // (including an `accessed` stamp), or omits/reorders the summary; no_claim=that a
+  // browser opens (--no-open skips that branch entirely).
+  freshViewStore();
+  writeNote({
+    id: 'view-a', type: 'system', title: 'A', body: 'a', repos: ['repo-a'],
+    edges: [{ rel: 'depends-on', dst: 'view-b' }],
+  });
+  writeNote({ id: 'view-b', type: 'decision', title: 'B', body: 'b', repos: ['repo-a'] });
+  writeNote({ id: 'view-c', type: 'convention', title: 'C', body: 'c', repos: [] });
+  rmSync(paths.db, { force: true });
+  assert.ok(!existsSync(paths.db));
+  const before = hashNotes();
+
+  const outside = mkdtempSync(join(tmpdir(), 'agent-memory-view-cwd-'));
+  try {
+    const r = runView(['--no-open'], outside);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stderr, '');
+    const pathLine = r.stdout.split('\n')[0];
+    assert.equal(pathLine, `view: ${paths.view}`);
+    assert.ok(isAbsolute(pathLine.slice('view: '.length)));
+    const m = SUMMARY_RE.exec(r.stdout);
+    assert.ok(m, `summary line missing from:\n${r.stdout}`);
+    assert.equal(m[1], '1', 'view-c is the one orphan');
+    assert.ok(existsSync(paths.view));
+    assert.match(readFileSync(paths.view, 'utf8'), /<svg viewBox=/);
+    assert.ok(!existsSync(paths.db), 'view must never create the index');
+    assert.deepEqual(hashNotes(), before, 'no note file changed, accessed included');
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('view --archived starts with archived notes shown; without it they start hidden', () => {
+  // protects=the --archived flag's initial page state; fails_when=the flag is ignored
+  // or archived notes start visible by default; no_claim=that the toggle works after
+  // load (that is browser-side and on the manual checklist).
+  freshViewStore();
+  writeNote({ id: 'kept', type: 'system', title: 'Kept', body: 'k', repos: [] });
+  writeNote({ id: 'shelved', type: 'system', title: 'Shelved', body: 's', repos: [] });
+  archiveNote('system', 'shelved');
+
+  const outside = mkdtempSync(join(tmpdir(), 'agent-memory-view-cwd-'));
+  try {
+    assert.equal(runView(['--no-open'], outside).status, 0);
+    let html = readFileSync(paths.view, 'utf8');
+    assert.match(html, /<body>/);
+    assert.doesNotMatch(html, /id="show-archived" type="checkbox" checked/);
+    assert.match(html, /<g class="node archived" data-id="shelved">/, 'archived notes are still drawn');
+
+    assert.equal(runView(['--no-open', '--archived'], outside).status, 0);
+    html = readFileSync(paths.view, 'utf8');
+    assert.match(html, /<body class="show-archived">/);
+    assert.match(html, /id="show-archived" type="checkbox" checked/);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('view audits a fixture store, and staleness depends on where it runs', () => {
+  // protects=every audit count end to end, and `unchecked` kept distinct from fresh;
+  // fails_when=a count is off by one, the 12-commit note is not stale inside its repo,
+  // or it reads as fresh (rather than unchecked) from outside any repo; no_claim=the
+  // staleness threshold itself (default 10, owned by staleness.js).
+  const repo = mkdtempSync(join(tmpdir(), 'agent-memory-view-repo-'));
+  const outside = mkdtempSync(join(tmpdir(), 'agent-memory-view-cwd-'));
+  const git = (...args) =>
+    execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  try {
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'test@example.com');
+    git('config', 'user.name', 'Test');
+    writeFileSync(join(repo, 'a.txt'), 'one', 'utf8');
+    git('add', '.');
+    git('commit', '-qm', 'first');
+    const first = git('rev-parse', 'HEAD');
+    for (let i = 0; i < 12; i++) {
+      writeFileSync(join(repo, 'a.txt'), `v${i}`, 'utf8');
+      git('add', '.');
+      git('commit', '-qm', `c${i}`);
+    }
+    const name = basename(repo);
+
+    freshViewStore();
+    writeNote({ id: 'lonely', type: 'convention', title: 'Lonely', body: 'no edges', repos: [] });
+    writeNote({
+      id: 'points-at-ghost', type: 'decision', title: 'Ghost', body: 'g', repos: [],
+      edges: [{ rel: 'depends-on', dst: 'not-a-note' }, { rel: 'applies-to', dst: 'pair-a' }],
+    });
+    writeNote({
+      id: 'pair-a', type: 'system', title: 'Pair A', body: 'a', repos: [],
+      edges: [{ rel: 'contradicts', dst: 'pair-b' }],
+    });
+    writeNote({ id: 'pair-b', type: 'system', title: 'Pair B', body: 'b', repos: [] });
+    writeNote({
+      id: 'old-claim', type: 'constraint', title: 'Old claim', body: 'o', repos: [name],
+      captured_sha: first, edges: [{ rel: 'depends-on', dst: 'pair-b' }],
+    });
+    writeFileSync(join(paths.typeDir('convention'), 'mangled.md'), 'no frontmatter at all', 'utf8');
+
+    const inside = runView(['--no-open'], repo);
+    assert.equal(inside.status, 0, inside.stderr);
+    assert.match(
+      inside.stdout,
+      /^orphans 1 · dangling 1 · contradictions 1 · stale 1 · broken 1 · unchecked 0$/m,
+    );
+    assert.deepEqual(embeddedModel().nodes.find((n) => n.id === 'old-claim').stale, { status: 'stale', commits: 12 });
+
+    const out = runView(['--no-open'], outside);
+    assert.equal(out.status, 0, out.stderr);
+    const m = SUMMARY_RE.exec(out.stdout);
+    assert.equal(m[4], '0', 'nothing can be stale where nothing can be checked');
+    assert.ok(Number(m[6]) >= 1, 'and the note that could not be checked says so');
+    assert.equal(embeddedModel().nodes.find((n) => n.id === 'old-claim').stale, 'unchecked');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('view renders a 500-note, 750-edge store within the time limit', () => {
+  // protects=view stays usable on a store far larger than today's; fails_when=model +
+  // layout + html for 500 notes exceeds AGENT_MEMORY_VIEW_PERF_MS (default 3000);
+  // no_claim=browser render time, or the speed of reading 500 files from disk.
+  const limit = Number(process.env.AGENT_MEMORY_VIEW_PERF_MS) || 3000;
+  let s = 42;
+  const rnd = () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+  const types = ['system', 'decision', 'convention', 'constraint'];
+  const notes = Array.from({ length: 500 }, (_, i) => ({
+    id: `n-${i}`, type: types[i % 4], title: `Note ${i}`, body: `Body ${i} `.repeat(20),
+    repos: [`repo-${i % 7}`], edges: [], archived: i % 50 === 0 ? 1 : 0, path: `/p/${i}.md`,
+  }));
+  for (let added = 0; added < 750;) {
+    const a = Math.floor(rnd() * 500);
+    const b = Math.floor(rnd() * 500);
+    if (a === b) continue;
+    notes[a].edges.push({ rel: 'depends-on', dst: `n-${b}` });
+    added += 1;
+  }
+
+  const t0 = performance.now();
+  const model = view.buildViewModel(notes, { generated: 'T' });
+  const html = view.renderHtml(model, view.layout(model));
+  const ms = performance.now() - t0;
+  assert.equal(model.nodes.length, 500);
+  assert.equal(model.edges.length, 750);
+  assert.ok(html.length > 0);
+  assert.ok(ms < limit, `took ${Math.round(ms)} ms, limit ${limit} ms`);
 });
