@@ -1057,7 +1057,9 @@ function cmdView(opts) {
     generated: new Date().toISOString(),
   });
   const html = renderHtml(model, layout(model), { showArchived: !!opts.archived });
-  atomicWrite(paths.view, html);
+  // Owner-only: the page carries every note body, and a store whose notes/ was locked
+  // down should not leak them through a world-readable snapshot beside it.
+  atomicWrite(paths.view, html, { mode: 0o600 });
   const summary = renderSummary(model);
 
   if (!opts['no-open']) openInBrowser(paths.view);
@@ -1086,7 +1088,9 @@ function openInBrowser(file) {
     cmd = 'xdg-open';
     args = [file];
   }
-  const fail = () => process.stdout.write('could not open a browser; open the file above by hand\n');
+  // stderr, not stdout: `view --json` prints a JSON result on stdout, and a trailing
+  // plain-text line there would make a successful run unparseable.
+  const fail = () => process.stderr.write('could not open a browser; open the file above by hand\n');
   try {
     execFile(cmd, args, { ...extra, timeout: 15000 }, (err) => { if (err) fail(); });
   } catch {

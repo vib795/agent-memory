@@ -36,9 +36,11 @@ export function tempName(target) {
   return `${target}.${process.pid}.${counter}.tmp`;
 }
 
-export function atomicWrite(target, contents) {
+export function atomicWrite(target, contents, { mode } = {}) {
   const tmp = tempName(target);
-  writeFileSync(tmp, contents, 'utf8');
+  // rename() carries the temp file's mode to the target, so a mode set here is the
+  // final one. Windows ignores it.
+  writeFileSync(tmp, contents, mode === undefined ? 'utf8' : { encoding: 'utf8', mode });
   for (let attempt = 0; ; attempt++) {
     try {
       renameSync(tmp, target);

@@ -36,7 +36,10 @@ export function makeStaleFn({ cwd = process.cwd(), cfg } = {}) {
   return (node) => {
     if (!node?.captured_sha) return null;
     if (!here) return 'unchecked';
-    if (Array.isArray(node.repos) && node.repos.length && !node.repos.includes(here)) return 'unchecked';
+    // A SHA with no repository has no provenance: measuring it against whatever checkout
+    // is open would report unrelated history as "rewritten".
+    if (!Array.isArray(node.repos) || node.repos.length === 0) return 'unchecked';
+    if (!node.repos.includes(here)) return 'unchecked';
     const s = staleness(node, { cwd, cfg, repo: here });
     return s ? { status: s.status, commits: s.commits } : null;
   };
@@ -49,6 +52,12 @@ export function buildViewModel(notes, { staleFn = () => null, engagement = '', g
   for (const n of notes) {
     if (n.__error) {
       broken.push({ path: n.path, error: n.__error });
+      continue;
+    }
+    // Parsed frontmatter with no usable id: two such files would share one map key and
+    // one would vanish, so each is reported by path instead.
+    if (typeof n.id !== 'string' || n.id === '') {
+      broken.push({ path: n.path, error: 'no id in frontmatter' });
       continue;
     }
     // An id in both active and archive should not happen (a write removes the
@@ -295,7 +304,7 @@ aside h3{margin:10px 0 4px;font-size:13px}
 #detail table{border-collapse:collapse;width:100%}
 #detail td{border-top:1px solid #eee;padding:2px 4px;vertical-align:top;word-break:break-word}
 #detail pre{white-space:pre-wrap;word-break:break-word;background:#f6f6f6;padding:6px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace}
-#detail a{color:#2457a6;cursor:pointer;margin-right:6px}
+#detail button.nb{font:inherit;color:#2457a6;background:none;border:0;padding:0;cursor:pointer;margin-right:6px;text-decoration:underline}
 .badge{display:inline-block;background:#fde7c4;border:1px solid #e0a040;border-radius:3px;padding:0 6px;margin:4px 0}
 g.node{cursor:pointer}
 g.node text{font-size:11px;fill:#333}
@@ -368,15 +377,17 @@ function renderAudits(model) {
  */
 function clientMain() {
   var model = JSON.parse(document.getElementById('data').textContent);
-  var byId = {};
+  // Null-prototype maps: an id like "constructor" must not hit an inherited key.
+  var byId = Object.create(null);
   model.nodes.forEach(function (n) { byId[n.id] = n; });
-  var gs = {};
+  var gs = Object.create(null);
   document.querySelectorAll('g.node').forEach(function (g) { gs[g.getAttribute('data-id')] = g; });
   var lines = Array.prototype.slice.call(document.querySelectorAll('line[data-src]'));
-  var rows = {};
+  var rows = Object.create(null);
   var auditOn = null;
   var auditSet = null;
   var selected = null;
+  var arch = document.getElementById("show-archived");
 
   function el(tag, text, cls) {
     var e = document.createElement(tag);
@@ -400,11 +411,13 @@ function clientMain() {
     typeBox.appendChild(label);
   });
   var repoSel = document.getElementById('repo');
-  var repos = {};
-  model.nodes.forEach(function (n) { n.repos.forEach(function (r) { repos[r] = true; }); });
-  Object.keys(repos).sort().forEach(function (r) {
+  // A Set, not an object: a repo named __proto__ or constructor is still a repo.
+  var repos = new Set();
+  model.nodes.forEach(function (n) { n.repos.forEach(function (r) { repos.add(r); }); });
+  Array.from(repos).sort().forEach(function (r) {
     var o = el('option', r);
-    o.value = r;
+    // Prefixed so no repository name can collide with the "all" or "(global)" modes.
+    o.value = 'r:' + r;
     repoSel.appendChild(o);
   });
   repoSel.addEventListener('change', apply);
@@ -423,7 +436,7 @@ function clientMain() {
   function matches(n) {
     if (!types[n.type]) return false;
     var r = repoSel.value;
-    if (r === '__global') { if (n.repos.length) return false; } else if (r && n.repos.indexOf(r) === -1) return false;
+    if (r === 'g:') { if (n.repos.length) return false; } else if (r && n.repos.indexOf(r.slice(2)) === -1) return false;
     var t = q.value.trim().toLowerCase();
     if (t && (n.id + '\n' + n.title + '\n' + n.body).toLowerCase().indexOf(t) === -1) return false;
     return true;
@@ -432,11 +445,11 @@ function clientMain() {
   function apply() {
     var visible = {};
     model.nodes.forEach(function (n) {
-      var on = matches(n) && (!auditSet || auditSet[n.id]);
+      var on = matches(n) && (!auditSet || auditSet.has(n.id));
       visible[n.id] = on;
       if (gs[n.id]) {
         gs[n.id].classList.toggle('dim', !on);
-        gs[n.id].classList.toggle('hl', !!(auditSet && auditSet[n.id]));
+        gs[n.id].classList.toggle('hl', !!(auditSet && auditSet.has(n.id)));
       }
       rows[n.id].classList.toggle('dim', !on);
     });
@@ -462,7 +475,9 @@ function clientMain() {
     if (gs[id]) gs[id].classList.add('sel');
     var d = document.getElementById('detail');
     d.textContent = '';
-    d.appendChild(el('h3', n.title));
+    var h3 = el('h3', n.title);
+    h3.tabIndex = -1;
+    d.appendChild(h3);
     d.appendChild(el('div', n.id + ' · ' + n.type + (n.archived ? ' · archived' : '')));
     d.appendChild(el('div', 'repos: ' + (n.repos.length ? n.repos.join(', ') : '(global)')));
     var st = staleText(n);
@@ -474,9 +489,20 @@ function clientMain() {
       if (other === null) return;
       var label = (e.src === id ? e.rel + ' → ' : '← ' + e.rel + ' ') + other;
       if (e.dangling) { nb.appendChild(el('span', label + ' (missing) ')); return; }
-      var a = el('a', label);
-      a.addEventListener('click', function () { select(other); });
-      nb.appendChild(a);
+      // A hidden archived neighbour stays named but is not a way back into it.
+      if (byId[other] && byId[other].archived && !arch.checked) {
+        nb.appendChild(el('span', label + ' (archived) '));
+        return;
+      }
+      // A real button, so Tab reaches it and Enter follows it.
+      var b = el('button', label, 'nb');
+      b.type = 'button';
+      b.addEventListener('click', function () {
+        select(other);
+        var h = document.querySelector('#detail h3');
+        if (h) h.focus();
+      });
+      nb.appendChild(b);
     });
     d.appendChild(nb);
     var tbl = el('table');
@@ -495,18 +521,28 @@ function clientMain() {
     gs[id].addEventListener('click', function () { select(id); });
   });
 
-  var arch = document.getElementById('show-archived');
   arch.addEventListener('change', function () {
     document.body.classList.toggle('show-archived', arch.checked);
+    // Hiding archives must hide an archived note already open in the detail pane too.
+    if (!arch.checked && selected && byId[selected] && byId[selected].archived) {
+      gs[selected] && gs[selected].classList.remove('sel');
+      selected = null;
+      var d = document.getElementById('detail');
+      d.textContent = '';
+      d.appendChild(el('p', 'Click a node or a row for its details.'));
+    } else if (selected) {
+      select(selected); // re-render so neighbour links match the toggle
+    }
   });
 
   function auditIds(key) {
     var a = model.audits;
-    var out = {};
-    if (key === 'orphans' || key === 'stale') a[key].forEach(function (id) { out[id] = true; });
-    if (key === 'dangling') a.dangling.forEach(function (d) { out[d.src] = true; });
-    if (key === 'contradictions') a.contradictions.forEach(function (c) { out[c.a] = true; out[c.b] = true; });
-    if (key === 'unchecked') model.nodes.forEach(function (n) { if (!n.archived && n.stale === 'unchecked') out[n.id] = true; });
+    // A Set, so an id like "constructor" is a member only when it is really in the audit.
+    var out = new Set();
+    if (key === 'orphans' || key === 'stale') a[key].forEach(function (id) { out.add(id); });
+    if (key === 'dangling') a.dangling.forEach(function (d) { out.add(d.src); });
+    if (key === 'contradictions') a.contradictions.forEach(function (c) { out.add(c.a); out.add(c.b); });
+    if (key === 'unchecked') model.nodes.forEach(function (n) { if (!n.archived && n.stale === 'unchecked') out.add(n.id); });
     return out;
   }
 
@@ -552,7 +588,7 @@ ${renderSvg(model, positions, width, height)}
 <aside>
 <h3>Filter</h3>
 <div id="types"></div>
-<div><select id="repo"><option value="">all repos</option><option value="__global">(global)</option></select></div>
+<div><select id="repo"><option value="">all repos</option><option value="g:">(global)</option></select></div>
 <div><input id="q" type="search" placeholder="id, title or body" style="width:100%"></div>
 <div><label><input id="show-archived" type="checkbox"${showArchived ? ' checked' : ''}> show archived</label></div>
 <h3>Notes (${model.nodes.length})</h3>

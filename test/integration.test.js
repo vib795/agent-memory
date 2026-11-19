@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync, readdirSync,
-  symlinkSync,
+  symlinkSync, statSync,
 } from 'node:fs';
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -1923,6 +1923,10 @@ test('view --no-open writes the page, prints path and audits, and changes nothin
     const pathLine = r.stdout.split('\n')[0];
     assert.equal(pathLine, `view: ${paths.view}`);
     assert.ok(isAbsolute(pathLine.slice('view: '.length)));
+    // The page carries every note body, so it is owner-only. Windows has no POSIX mode.
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(paths.view).mode & 0o777, 0o600, 'view.html is owner-only');
+    }
     const m = SUMMARY_RE.exec(r.stdout);
     assert.ok(m, `summary line missing from:\n${r.stdout}`);
     assert.equal(m[1], '1', 'view-c is the one orphan');

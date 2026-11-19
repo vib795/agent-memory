@@ -402,7 +402,7 @@ What the working directory changes is *scope*, never location.
 | `tree` | whole store | **filters it** — defaults to the current repo |
 | `brief` | whole store | **filters it** — the same scoping as `tree` |
 | `write` | whole store | **is stamped into the note** — see below |
-| `view` | whole store | staleness is measured only for this repo's notes; the rest show as `unchecked` |
+| `view` | whole store | staleness is measured only for notes that name this repo and carry a capture SHA; other captured notes show as `unchecked`, and notes with no SHA have nothing to measure |
 
 The current repo is `git rev-parse --show-toplevel` reduced to its directory name.
 Outside a git repository it is `null` and every command still works: `tree` comes
@@ -466,9 +466,9 @@ Across the top it counts what nothing else surfaces:
 | orphans | live notes with no edges, so nothing leads to them |
 | dangling | an edge pointing at an id that does not exist |
 | contradictions | every `contradicts` edge, so you can settle them |
-| stale | captured 10+ commits ago (the `staleAnnotateCommits` cap) |
+| stale | captured 10+ commits ago (the `staleAnnotateCommits` cap), or its capture commit is no longer in this repo's history (shown as "history rewritten") |
 | broken | a note file that does not parse |
-| unchecked | notes from other repos, whose staleness cannot be measured from here |
+| unchecked | captured notes that cannot be measured from here: they name other repos, or name no repo at all, so the SHA has nowhere to be counted |
 
 A zero still prints as `0`: a missing count would read as "fine". The command is
 read-only. It never opens `index.db` and never touches `accessed`, so looking at the
@@ -622,7 +622,7 @@ them as skipped, which is the intended outcome, not a failure.
 
 Needs Node 22.16 or newer; `doctor` says so plainly if the version is too old.
 
-Run `npm test` for the suite (126 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (128 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 

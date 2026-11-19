@@ -269,6 +269,30 @@ const vn = (id, type, edges = [], extra = {}) => ({
   path: `/fixture/${type}/${id}.md`, ...extra,
 });
 
+test('view model: files with no id are each reported broken, not merged into one node', () => {
+  // protects=audits.broken for frontmatter that parses but has no id; fails_when=two such
+  // files collapse onto one `undefined` key and one disappears, or a nameless node is
+  // drawn; no_claim=what listNotes() does with such a file.
+  const notes = [
+    vn('real', 'system'),
+    { ...vn(undefined, 'decision'), path: '/fixture/decision/x.md' },
+    { ...vn('', 'decision'), path: '/fixture/decision/y.md' },
+  ];
+  const m = view.buildViewModel(notes);
+  assert.deepEqual(m.nodes.map((n) => n.id), ['real']);
+  assert.deepEqual(m.audits.broken.map((b) => b.path), ['/fixture/decision/x.md', '/fixture/decision/y.md']);
+});
+
+test('view staleness: a SHA with no repository is unchecked, never measured here', () => {
+  // protects=makeStaleFn's provenance rule; fails_when=a repo-less capture is counted
+  // against whatever checkout is open and reported stale or rewritten; no_claim=behaviour
+  // outside a git checkout (covered by the integration test).
+  const fn = view.makeStaleFn({ cfg: { staleAnnotateCommits: 10 } });
+  assert.equal(fn({ id: 'g', captured_sha: 'deadbeef'.repeat(5), repos: [] }), 'unchecked');
+  assert.equal(fn({ id: 'g2', captured_sha: 'deadbeef'.repeat(5) }), 'unchecked');
+  assert.equal(fn({ id: 'n', repos: [] }), null, 'no SHA, nothing to measure');
+});
+
 test('view model: a note with no edges in or out is the one orphan', () => {
   // protects=audits.orphans; fails_when=a note reached only by an incoming edge, or one
   // whose only edge touches an archived note, is reported as an orphan; no_claim=that
