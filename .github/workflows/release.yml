@@ -22,13 +22,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write   # cut the GitHub Release
-      id-token: write   # sign the npm provenance attestation
+      id-token: write   # OIDC: npm trusted publishing, and the provenance it signs
     steps:
       - uses: actions/checkout@v4
 
+      # Node 24 because trusted publishing needs npm 11.5.1 or later, and Node 22
+      # ships npm 10. This is only the publisher's toolchain; the package's own floor
+      # stays Node 22.16, and the test matrix above still proves it there.
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       # A tag that disagrees with package.json means someone tagged the wrong commit
@@ -59,23 +62,23 @@ jobs:
           fi
           echo "$name@$ver is unpublished; proceeding"
 
-      # --provenance ties the tarball to this workflow run and this commit, and npm
-      # renders the badge on the package page. It needs `id-token: write` above and a
-      # public repository, both of which hold here.
-      # The failure mode this catches cost a release once. npm reports EOTP, which
-      # reads as "your code was wrong" but actually means the token was never allowed
-      # to publish without one. Translating it here saves the next person the hour.
+      # Trusted publishing: no npm token exists anywhere. npm trusts this exact
+      # workflow file in this repository, proven by the OIDC token GitHub mints for the
+      # run, so there is nothing to expire every 90 days and nothing to leak. Provenance
+      # is generated automatically for a public repo and package, which is why
+      # --provenance is gone.
+      # npm checks the trust settings only at publish time, and reports a mismatch as
+      # ENEEDAUTH, which reads like a missing login. The translation below names the
+      # settings that actually have to match.
       - name: Publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set +e
-          npm publish --provenance --access public 2>&1 | tee "$RUNNER_TEMP/publish.log"
+          npm publish --access public 2>&1 | tee "$RUNNER_TEMP/publish.log"
           code=${PIPESTATUS[0]}
           set -e
           if [ "$code" -ne 0 ]; then
-            if grep -q 'EOTP' "$RUNNER_TEMP/publish.log"; then
-              echo "::error::NPM_TOKEN cannot publish without a one-time password. Regenerate the granular token with 'Allow this token to bypass 2FA' checked, update the secret, then re-run this job."
+            if grep -qE 'ENEEDAUTH|E404|EOTP' "$RUNNER_TEMP/publish.log"; then
+              echo "::error::npm did not accept this run as a trusted publisher. On npmjs.com, package Settings, Trusted publishing must name GitHub Actions, user vib795, repository agent-memory, workflow release.yml, no environment, with direct 'npm publish' allowed. Fix it there, then re-run this job."
             fi
             exit "$code"
           fi
