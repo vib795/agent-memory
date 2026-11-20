@@ -456,10 +456,24 @@ two slash commands in a chat box. The ones a person actually types are `setup`,
 `agent-memory view` writes `~/.agents/memory/view.html` and opens it in your
 browser. It is one self-contained file: the graph is drawn as static SVG, so it shows
 even with scripts off, and a strict content security policy stops the page loading
-anything from anywhere. Click a note for its body, frontmatter, neighbours and
-staleness; filter by type, repo or text.
+anything from anywhere.
 
-Across the top it counts what nothing else surfaces:
+With scripts on, the graph is live and built to explore rather than read all at once:
+
+- Notes settle with a gentle spring motion; drag one and its neighbours follow.
+  Scroll or pinch to zoom, drag the background to pan.
+- Labels appear as you zoom in; at overview only the hubs are named.
+- Hover a note to light up its links (with their relation names) and fade the rest.
+- Click a note to open it in a side drawer (a bottom sheet on a phone) with its body,
+  links, staleness and frontmatter. **1 hop** / **2 hops** shows only its neighbourhood,
+  and the arrow keys walk its links.
+- The legend is the type filter. Search (`/`) highlights the matches and zooms to them;
+  Enter opens the first one.
+- Unlinked notes stay off the canvas until you click the **Unlinked** audit.
+- Light and dark follow your system, or pick one with the theme button.
+
+Across the top, one chip per audit counts what nothing else surfaces; click a chip to
+highlight those notes and list them in the drawer:
 
 | Audit | Means |
 |---|---|
@@ -622,7 +636,7 @@ them as skipped, which is the intended outcome, not a failure.
 
 Needs Node 22.16 or newer; `doctor` says so plainly if the version is too old.
 
-Run `npm test` for the suite (128 tests, no dependencies). CI runs it on Linux,
+Run `npm test` for the suite (129 tests, no dependencies). CI runs it on Linux,
 macOS and Windows across Node 22 and 24, and separately installs the packed tarball
 and exercises it end to end on all three.
 
