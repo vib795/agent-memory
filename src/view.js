@@ -1588,7 +1588,11 @@ function clientMain() {
         if (key === 'stale' && s.n.stale && s.n.stale.commits) b.appendChild(el('span', s.n.stale.commits + ' commits', 'tag warn'));
         b.addEventListener('mouseenter', function () { setHover(id); });
         b.addEventListener('mouseleave', function () { setHover(null); });
-        b.addEventListener('click', function () { select(id, { frame: true, back: 'audit' }); });
+        b.addEventListener('click', function () {
+          // An audit can list an archived note; opening it shows archived notes rather than a hidden one.
+          if (s.n.archived && !archBox.checked) { archBox.checked = true; archBox.dispatchEvent(new Event('change')); }
+          select(id, { frame: true, back: 'audit' });
+        });
         auditPane.appendChild(b);
       });
     }

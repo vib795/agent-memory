@@ -3,7 +3,7 @@
 How agent-memory is built, and why it is built that way.
 
 Every figure here was read from the source rather than written from memory, at
-v0.9.2: 17 modules, 6,048 lines of JavaScript, zero
+v0.9.2: 17 modules, 6,052 lines of JavaScript, zero
 runtime dependencies and zero dev dependencies, 129 tests.
 
 ---
@@ -506,7 +506,7 @@ The properties that must stay true. Each is covered by the test suite.
 |---|--:|---|
 | `cli.js` | 1175 | 15 commands; one process, one answer |
 | `digest.js` | 559 | tiers 1 and 2: both descriptions, tree, brief |
-| `view.js` | 1783 | read-only HTML graph snapshot with audits; no index, no network |
+| `view.js` | 1787 | read-only HTML graph snapshot with audits; no index, no network |
 | `compact.js` | 372 | dedupe, supersede, decay, regenerate |
 | `index-db.js` | 317 | SQLite cache: DDL, reindex, FTS5 search |
 | `setup.js` | 297 | install into detected agent surfaces |
@@ -521,7 +521,7 @@ The properties that must stay true. Each is covered by the test suite.
 | `promptfile.js` | 78 | VS Code prompt files derived from SKILL.md |
 | `atomic.js` | 59 | atomic write; imports nothing from this package |
 | `bin.js` | 33 | the Node floor, checked before the module graph loads |
-| **total** | **6,048** | zero dependencies, 129 tests |
+| **total** | **6,052** | zero dependencies, 129 tests |
 
 `atomic.js` deliberately imports nothing from the package: `store.js` already imports
 `config.js`, so putting the atomic write in either would create a cycle.
