@@ -639,7 +639,7 @@ const AUDIT_META = {
   orphans: { label: 'Unlinked', tone: 'info', lede: 'Notes with no links in or out. Nothing in the graph leads to them; link them or archive them.' },
   dangling: { label: 'Dangling', tone: 'danger', lede: 'Links that point at a note that does not exist.' },
   contradictions: { label: 'Contradictions', tone: 'danger', lede: 'Pairs joined by a contradicts link. Settle each one.' },
-  stale: { label: 'Stale', tone: 'warn', lede: 'Captured 10 or more commits ago in this repository, or at a commit no longer in its history. Check each still holds.' },
+  stale: { label: 'Stale', tone: 'warn', lede: 'Captured at least staleAnnotateCommits commits ago in this repository (10 unless configured), or at a commit no longer in its history. Check each still holds.' },
   broken: { label: 'Unreadable', tone: 'danger', lede: 'Note files that do not parse.' },
   unchecked: { label: 'Unchecked', tone: 'info', lede: 'Captured in other repositories, so their staleness cannot be measured from here.' },
 };
@@ -769,6 +769,9 @@ function clientMain() {
     return e;
   }
   function wait(fn, ms) { return setTimeout(fn, reduce ? 0 : ms); }
+  // One pending camera move at a time: a newer selection, audit or deselect supersedes an older one.
+  var cameraTimer = 0;
+  function camera(fn, ms) { clearTimeout(cameraTimer); cameraTimer = wait(fn, ms); }
 
   // --- theme -------------------------------------------------------------------
   var themeBtn = document.getElementById('theme');
@@ -840,6 +843,7 @@ function clientMain() {
   var auditKey = null;
   var auditSet = null;
   var matchSet = null;
+  var query = '';
   var scope = 0;
   var types = Object.create(null);
   var showArchived = body.classList.contains('show-archived');
@@ -1108,21 +1112,34 @@ function clientMain() {
     }
     return seen;
   }
+  // Every active reason to show the shelf of unlinked notes: an audit, the selection, a search.
+  function syncShelf() {
+    function anyFree(set) { return !!set && Array.from(set).some(function (id) { return S[id] && S[id].free; }); }
+    body.classList.toggle('show-free', auditKey === 'orphans' || anyFree(auditSet) || anyFree(matchSet)
+      || !!(selectedId && S[selectedId] && S[selectedId].free));
+  }
   function refresh(opts) {
     opts = opts || {};
     var repo = repoSel.value;
     var sc = inScope();
     var changed = false;
+    var shown = 0;
     all.forEach(function (s) {
       var n = s.n;
-      var hide = types[n.type] === false
+      var filtered = types[n.type] === false
         || (repo === 'g:' && n.repos.length > 0)
         || (repo && repo !== 'g:' && n.repos.indexOf(repo.slice(2)) === -1)
-        || (n.archived && !showArchived)
-        || (sc && !sc.has(s.id));
+        || (n.archived && !showArchived);
+      var hide = filtered || (sc && !sc.has(s.id));
       if (hide !== s.hidden) { s.hidden = hide; changed = true; }
       if (s.g) s.g.style.display = hide ? 'none' : '';
+      // The browse list follows the same filters (not the 1/2-hop scope), so its count is honest.
+      if (rows[s.id]) rows[s.id].hidden = filtered;
+      if (!filtered) shown++;
     });
+    groups.forEach(function (gr) { gr.h.hidden = gr.ids.every(function (id) { return rows[id].hidden; }); });
+    if (changed && query) { matchSet = matches(); searchMeta(); }
+    syncShelf();
     var focus = hoverId || selectedId;
     var focusSet = null;
     if (focus && S[focus]) {
@@ -1148,10 +1165,10 @@ function clientMain() {
     });
     edgeLabels(focus);
     labels();
-    document.getElementById('shown').textContent = all.filter(function (s) { return !s.hidden; }).length + ' notes shown';
+    document.getElementById('shown').textContent = shown + (shown === 1 ? ' note shown' : ' notes shown');
     if (changed) {
       reheat(0.35);
-      if (opts.refit !== false) wait(function () { fitAll(true); }, 260);
+      if (opts.refit !== false) camera(function () { fitAll(true); }, 260);
     }
   }
   function edgeLabels(focus) {
@@ -1235,8 +1252,18 @@ function clientMain() {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
       pointers.set(e.pointerId, [e.clientX, e.clientY]);
       var g = e.target.closest && e.target.closest('g.node');
+      if (gesture) letGo(gesture); // a second finger turns a drag into a pinch: free the dragged note
       gesture = { x: e.clientX, y: e.clientY, moved: false, node: g ? S[g.getAttribute('data-id')] : null, pinch: null };
     });
+    function letGo(gst) {
+      if (gst.node && gst.node.fx != null) {
+        gst.node.fx = null;
+        gst.node.fy = null;
+        alphaTarget = 0;
+        reheat(0.1);
+      }
+      gst.node = null;
+    }
     svg.addEventListener('pointermove', function (e) {
       if (!gesture) {
         var g = e.target.closest && e.target.closest('g.node');
@@ -1255,7 +1282,7 @@ function clientMain() {
         }
         gesture.pinch = d;
         gesture.moved = true;
-        gesture.node = null;
+        letGo(gesture);
         return;
       }
       if (!gesture.moved && Math.hypot(e.clientX - gesture.x, e.clientY - gesture.y) < 4) return;
@@ -1290,20 +1317,16 @@ function clientMain() {
       var gst = gesture;
       gesture = null;
       svg.classList.remove('panning');
-      if (gst.node && gst.moved) {
-        gst.node.fx = null;
-        gst.node.fy = null;
-        alphaTarget = 0;
-        reheat(0.1);
-        return;
-      }
-      if (!gst.moved && e.type === 'pointerup') {
+      if (gst.node && gst.moved) { letGo(gst); return; }
+      // Only a release on the canvas itself counts as a click.
+      if (!gst.moved && e.type === 'pointerup' && svg.contains(e.target)) {
         if (gst.node) select(gst.node.id, { frame: true });
         else if (selectedId) deselect();
       }
     };
-    svg.addEventListener('pointerup', end);
-    svg.addEventListener('pointercancel', end);
+    // On the window, so a press that leaves the canvas before it moves far still ends when released.
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
     svg.addEventListener('pointerleave', function () { if (!gesture) setHover(null); });
     svg.addEventListener('dblclick', function (e) {
       var p = toSvg(e.clientX, e.clientY);
@@ -1348,14 +1371,18 @@ function clientMain() {
     var wasOpen = drawer.classList.contains('open');
     drawer.classList.add('open');
     drawer.removeAttribute('aria-hidden');
+    drawer.inert = false;
     browseBtn.setAttribute('aria-pressed', String(which === 'browse'));
     dBody.scrollTop = 0;
     if (!wasOpen) reframe();
   }
   function closeDrawer() {
     if (!drawer.classList.contains('open')) return;
+    // Hand focus back to the canvas before the drawer leaves the tab order.
+    if (drawer.contains(document.activeElement)) browseBtn.focus();
     drawer.classList.remove('open');
     drawer.setAttribute('aria-hidden', 'true');
+    drawer.inert = true;
     browseBtn.setAttribute('aria-pressed', 'false');
     view = null;
     backTo = null;
@@ -1454,14 +1481,14 @@ function clientMain() {
     selectedId = id;
     hoverId = null;
     hideTip();
-    if (s.free) { body.classList.add('show-free'); if (scope) setScope(0, true); }
+    if (s.free && scope) setScope(0, true);
     renderDetail(s);
     openDrawer('note', s.n.type + ' note', back);
     Object.keys(rows).forEach(function (k) { rows[k].classList.toggle('sel', k === id); });
     syncScopeButtons();
     refresh({ refit: false });
     if (opts.frame) {
-      wait(function () {
+      camera(function () {
         fit([s].concat(s.free ? [] : s.nbrs.filter(function (o) { return !o.hidden; })), true);
       }, 280);
     }
@@ -1469,9 +1496,9 @@ function clientMain() {
   function deselect() {
     var to = backTo;
     selectedId = null;
+    clearTimeout(cameraTimer);
     if (scope) setScope(0, true);
     Object.keys(rows).forEach(function (k) { rows[k].classList.remove('sel'); });
-    if (auditKey !== 'orphans' && !(matchSet && Array.from(matchSet).some(function (id) { return S[id].free; }))) body.classList.remove('show-free');
     if (to === 'browse') openBrowse();
     else if (to === 'audit' && auditKey) openAudit(auditKey);
     else closeDrawer();
@@ -1515,6 +1542,7 @@ function clientMain() {
 
   // --- browse: every note, grouped by type -------------------------------------------------
   var rows = Object.create(null);
+  var groups = [];
   var listBox = document.getElementById('list');
   var groupType = null;
   model.nodes.forEach(function (n) {
@@ -1523,8 +1551,10 @@ function clientMain() {
       h.appendChild(el('span', null, 'dot t-' + n.type));
       h.appendChild(document.createTextNode(n.type));
       listBox.appendChild(h);
+      groups.push({ h: h, ids: [] });
       groupType = n.type;
     }
+    groups[groups.length - 1].ids.push(n.id);
     var b = el('button', null, 'row' + (n.archived ? ' archived' : ''));
     b.type = 'button';
     var main = el('span', null, 'row-main');
@@ -1580,9 +1610,11 @@ function clientMain() {
         b.appendChild(el('span', null, 'dot t-' + s.n.type));
         var main = el('span', null, 'row-main');
         main.appendChild(el('span', s.n.title || id, 'row-title'));
-        var sub = id;
-        if (key === 'dangling') AUDITS.dangling.forEach(function (d) { if (d.src === id) sub = d.rel + ' → ' + d.dst + ' (missing)'; });
-        if (key === 'contradictions') AUDITS.contradictions.forEach(function (x) { if (x.a === id) sub = 'contradicts ' + x.b; });
+        // One row per note, naming every missing destination or contradicting note it has.
+        var subs = [];
+        if (key === 'dangling') AUDITS.dangling.forEach(function (d) { if (d.src === id) subs.push(d.rel + ' → ' + d.dst); });
+        if (key === 'contradictions') AUDITS.contradictions.forEach(function (x) { if (x.a === id) subs.push(x.b); else if (x.b === id) subs.push(x.a); });
+        var sub = !subs.length ? id : key === 'dangling' ? subs.join(', ') + ' (missing)' : 'contradicts ' + subs.join(', ');
         main.appendChild(el('span', sub, 'row-id'));
         b.appendChild(main);
         if (key === 'stale' && s.n.stale && s.n.stale.commits) b.appendChild(el('span', s.n.stale.commits + ' commits', 'tag warn'));
@@ -1605,12 +1637,14 @@ function clientMain() {
     selectedId = null;
     if (scope) setScope(0, true);
     syncScopeButtons();
-    body.classList.toggle('show-free', key === 'orphans' || (!!auditSet && Array.from(auditSet).some(function (id) { return S[id] && S[id].free; })));
-    if (key) openAudit(key); else if (view === 'audit' && !quiet) closeDrawer();
+    clearTimeout(cameraTimer);
+    // Dismissing an audit also closes a note opened from it: the selection is gone either way.
+    if (key) openAudit(key); else if (!quiet && (view === 'audit' || view === 'note')) closeDrawer();
     if (quiet) return;
     refresh({ refit: false });
-    wait(function () {
-      var list = key ? visibleList().filter(function (s) { return auditSet.has(s.id); }) : visibleList();
+    camera(function () {
+      var set = auditSet;
+      var list = set ? visibleList().filter(function (s) { return set.has(s.id); }) : visibleList();
       fit(list.length ? list : visibleList(), true);
     }, 280);
   }
@@ -1625,25 +1659,31 @@ function clientMain() {
   var q = document.getElementById('q');
   var qMeta = document.getElementById('q-meta');
   var qTimer = 0;
+  // Matches among the notes the filters show; refresh() recomputes them when visibility changes.
+  function matches() {
+    var out = new Set();
+    all.forEach(function (s) {
+      var n = s.n;
+      if (!s.hidden && (n.id + '\n' + n.title + '\n' + n.body).toLowerCase().indexOf(query) !== -1) out.add(s.id);
+    });
+    return out;
+  }
+  function searchMeta() {
+    qMeta.textContent = matchSet.size ? matchSet.size + (matchSet.size === 1 ? ' match · ↵' : ' matches · ↵') : 'no matches';
+  }
   function runSearch() {
-    var query = q.value.trim().toLowerCase();
+    query = q.value.trim().toLowerCase();
     clearTimeout(qTimer);
     if (!query) {
       matchSet = null;
       qMeta.textContent = '';
       qMeta.appendChild(el('kbd', '/'));
-      if (!auditKey && !(selectedId && S[selectedId].free)) body.classList.remove('show-free');
       refresh({ refit: false });
       return;
     }
-    matchSet = new Set();
-    all.forEach(function (s) {
-      var n = s.n;
-      if (!s.hidden && (n.id + '\n' + n.title + '\n' + n.body).toLowerCase().indexOf(query) !== -1) matchSet.add(s.id);
-    });
-    qMeta.textContent = matchSet.size ? matchSet.size + (matchSet.size === 1 ? ' match · ↵' : ' matches · ↵') : 'no matches';
-    body.classList.toggle('show-free', Array.from(matchSet).some(function (id) { return S[id].free; }) || auditKey === 'orphans');
+    matchSet = matches();
     refresh({ refit: false });
+    searchMeta();
     qTimer = setTimeout(function () {
       var list = all.filter(function (s) { return matchSet && matchSet.has(s.id) && s.g; });
       if (list.length) fit(list, true);
@@ -1693,8 +1733,10 @@ function clientMain() {
   syncScopeButtons();
   if (svg && sims.length) {
     // Settle before the first paint: the page opens on a calm picture, not a jiggle.
+    // Bounded: each tick compares every pair, so a large store gets fewer warm-up ticks
+    // (about 30M pair visits at most) and starts from its static layout instead.
     alpha = 1;
-    settle(300);
+    settle(Math.max(10, Math.min(300, Math.floor(3e7 / (sims.length * sims.length)))));
     alpha = 0;
   }
   if (svg) {
@@ -1761,7 +1803,7 @@ ${graph}
 <div class="hud hud-br"><div class="zoom glass"><button type="button" id="zin" aria-label="Zoom in" title="Zoom in (+)">+</button><button type="button" id="zout" aria-label="Zoom out" title="Zoom out (−)">−</button><button type="button" id="zfit" aria-label="Fit to view" title="Fit (0)">⤢</button></div></div>
 <div class="tip" id="tip" role="tooltip" hidden></div>
 </section>
-<aside class="drawer" id="drawer" aria-hidden="true" aria-label="Details">
+<aside class="drawer" id="drawer" aria-hidden="true" inert aria-label="Details">
 <div class="drawer-in">
 <div class="drawer-head"><button type="button" class="back" id="drawer-back" hidden><span aria-hidden="true">‹</span><span></span></button><span class="ttl" id="drawer-title"></span><button type="button" class="x" id="drawer-close" aria-label="Close" title="Close (Esc)">×</button></div>
 <div class="drawer-body" id="drawer-body">
